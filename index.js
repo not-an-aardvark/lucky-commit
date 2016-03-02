@@ -1,4 +1,4 @@
-#! /usr/bin/env node
+#!/usr/bin/env node
 'use strict';
 const exec = require('child_process').execSync;
 const desiredString = process.argv[2] || '0000000';
@@ -12,4 +12,4 @@ for (let numAttempts = 0; !require('crypto').createHash('sha1').update(currentSt
   const strWithNewMessage = `${lastCommit.slice(0, -1)}\n\n${numAttempts.toString(36)}\n`;
   currentStr = `commit ${strWithNewMessage.length}\u0000${strWithNewMessage}`;
 }
-exec(`GIT_COMMITTER_DATE="${previousDate}" git commit --amend -m "${currentStr.split('\n').slice(4, -1).join('\n')}"`);
+exec(`GIT_COMMITTER_DATE="${previousDate}" git commit --amend -m '${currentStr.split('\n').slice(4, -1).join('\n').replace(/'/g, `'"'"'`)}'`);
