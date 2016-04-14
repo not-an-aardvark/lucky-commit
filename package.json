@@ -1,6 +1,6 @@
 {
   "name": "lucky-commit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Make your git commit hashes lucky!",
   "bin": {
     "lucky-commit": "index.js"

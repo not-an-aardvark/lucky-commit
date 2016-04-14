@@ -24,7 +24,7 @@ lucky-commit amends your commit messages by adding a few characters of various t
 ```bash
 $ lucky-commit 1010101
 $ git log
-1010101 (HEAD -> master) Some commit (take note of the hash on the left)
+1010101 (HEAD -> master) Some commit
 ```
 
 On average, this requires the computation of 16<sup>7</sup> sha1 hashes, which takes about 20 minutes on my laptop.
