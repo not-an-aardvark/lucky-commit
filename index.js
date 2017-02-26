@@ -20,14 +20,14 @@ function luckyCommit (desiredString) {
     throw new TypeError('Invalid input provided. (If an input is provided, it must be a hex string.)');
   }
 
-  const previousDate = exec('git --no-pager show -s --oneline --format="%cd" head').slice(0, -1);
+  const previousDate = exec('git --no-pager show -s --oneline --format="%cd" HEAD').slice(0, -1);
 
-  if (exec('git --no-pager show -s --oneline --format="%GG" head').trim()) {
+  if (exec('git --no-pager show -s --oneline --format="%GG" HEAD').trim()) {
     exec('GIT_COMMITTER_DATE="' + previousDate + '" git commit --amend --no-gpg-sign --no-edit');
   }
 
-  const lastCommit = exec('git cat-file commit head').slice(0, -1);
-  const previousMessage = exec('git --no-pager show -s --oneline --format="%B" head').slice(0, -2);
+  const lastCommit = exec('git cat-file commit HEAD').slice(0, -1);
+  const previousMessage = exec('git --no-pager show -s --oneline --format="%B" HEAD').slice(0, -2);
   let currentString;
   let counter = 0;
   do {
