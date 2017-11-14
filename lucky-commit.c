@@ -1,14 +1,14 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
-#include <math.h>
 #include <errno.h>
-#include <sys/stat.h>
+#include <math.h>
+#include <openssl/sha.h>
 #include <pthread.h>
 #include <signal.h>
-#include <openssl/sha.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <zlib.h>
 
