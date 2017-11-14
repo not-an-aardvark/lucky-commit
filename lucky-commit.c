@@ -1,10 +1,13 @@
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <pthread.h>
+#include <signal.h>
 #include <openssl/sha.h>
 #include <zlib.h>
 
@@ -150,7 +153,7 @@ static char* getCommandOutput(char* command) {
   return output;
 }
 
-static unsigned char* convertPrefix(char* prefix) {
+static unsigned char* convertPrefix(const char* prefix) {
   size_t prefixLength = strlen(prefix);
   uint8_t byteLength = (prefixLength + 1) / 2;
   unsigned char* dataPrefix = malloc(byteLength);
@@ -212,13 +215,26 @@ static size_t getSplitIndex(const char* commitMessage) {
   }
 }
 
+struct HashSearchParams {
+  const char* currentMessage;
+  const char* desiredPrefix;
+  const uint64_t counterStart;
+  bool* done;
+  struct HashMatch* resultLoc;
+  pthread_mutex_t* matchLock;
+  pthread_cond_t* notifyDone;
+};
+
 struct HashMatch {
   char* data;
   unsigned char* hash;
   size_t size;
 };
 
-static struct HashMatch* getMatch(char* currentMessage, char* desiredPrefix) {
+static void* getMatch(void* params) {
+  const struct HashSearchParams* searchParams = (struct HashSearchParams*)params;
+  const char* currentMessage = searchParams->currentMessage;
+  const char* desiredPrefix = searchParams->desiredPrefix;
   const size_t initialMessageLength = strlen(currentMessage);
   const size_t headerLength = strlen("commit ") + numDigits(initialMessageLength) + 1;
   const size_t messageLength = initialMessageLength + EXTENSION_LENGTH;
@@ -248,7 +264,7 @@ static struct HashMatch* getMatch(char* currentMessage, char* desiredPrefix) {
   );
   padding = messageData + headerLength + splitIndex;
 
-  uint64_t counter = 0;
+  uint64_t counter = searchParams->counterStart;
 
   do {
     for (uint8_t blockOffset = 0; blockOffset < EXTENSION_LENGTH; blockOffset += 8) {
@@ -258,12 +274,16 @@ static struct HashMatch* getMatch(char* currentMessage, char* desiredPrefix) {
     counter++;
   } while (!matchesPrefix(hash, dataPrefix, dataPrefixLength, hasOddChar));
 
-  struct HashMatch* match = malloc(sizeof(struct HashMatch));
-  match->data = messageData;
-  match->hash = hash;
-  match->size = dataLength;
+  searchParams->resultLoc->data = messageData;
+  searchParams->resultLoc->hash = hash;
+  searchParams->resultLoc->size = dataLength;
+  *(searchParams->done) = true;
 
-  return match;
+  pthread_mutex_lock(searchParams->matchLock);
+  pthread_cond_signal(searchParams->notifyDone);
+  pthread_mutex_unlock(searchParams->matchLock);
+
+  return NULL;
 }
 
 struct ZlibResult {
@@ -342,7 +362,51 @@ static void gitResetToHash(unsigned char* hash) {
 static void luckyCommit(char* desiredPrefix) {
   char* currentCommit = getCommandOutput("git cat-file commit HEAD");
 
-  struct HashMatch* match = getMatch(currentCommit, desiredPrefix);
+  const size_t NUM_THREADS = 4;
+  pthread_t threads[NUM_THREADS];
+  bool completions[NUM_THREADS];
+  struct HashMatch results[NUM_THREADS];
+  struct HashSearchParams params[NUM_THREADS];
+  uint64_t COUNTER_STARTS[] = { 0UL, 1UL << 62, 1UL << 63, (1UL << 63) + (1UL << 62) };
+
+  pthread_mutex_t matchLock;
+  pthread_cond_t notifyDone;
+  struct HashMatch* match = NULL;
+
+  pthread_mutex_init(&matchLock, NULL);
+  pthread_cond_init(&notifyDone, NULL);
+
+  pthread_mutex_lock(&matchLock);
+  for (size_t i = 0; i < NUM_THREADS; i++) {
+    completions[i] = false;
+    params[i] = (struct HashSearchParams){
+      .currentMessage = currentCommit,
+      .desiredPrefix = desiredPrefix,
+      .counterStart = COUNTER_STARTS[i],
+      .done = &completions[i],
+      .resultLoc = &results[i],
+      .matchLock = &matchLock,
+      .notifyDone = &notifyDone
+    };
+    if (pthread_create(&threads[i], NULL, getMatch, &params[i]) != 0) {
+      fail("Failed to create pthread\n");
+    }
+  }
+  pthread_cond_wait(&notifyDone, &matchLock);
+
+  for (size_t i = 0; i < NUM_THREADS; i++) {
+    pthread_kill(threads[i], 0);
+    if (completions[i]) {
+      match = &results[i];
+      break;
+    }
+  }
+  pthread_mutex_unlock(&matchLock);
+
+  if (match == NULL) {
+    fail("No threads found match\n");
+  }
+
   struct ZlibResult* compressedObject = compressObject((unsigned char*)match->data, match->size);
 
   writeGitObject(match->hash, compressedObject);
