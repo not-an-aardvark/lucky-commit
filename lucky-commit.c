@@ -16,23 +16,23 @@
 #define EXTENSION_LENGTH 64
 
 struct HashSearchParams {
-  const char* currentMessage;
-  const char* desiredPrefix;
+  const char* const currentMessage;
+  const char* const desiredPrefix;
   const uint64_t counterStart;
-  bool* done;
-  struct HashMatch* resultLoc;
-  pthread_mutex_t* matchLock;
-  pthread_cond_t* notifyDone;
+  bool* const done;
+  struct HashMatch* const resultLoc;
+  pthread_mutex_t* const matchLock;
+  pthread_cond_t* const notifyDone;
 };
 
 struct HashMatch {
-  char* data;
-  unsigned char* hash;
+  const char* data;
+  const unsigned char* hash;
   size_t size;
 };
 
 struct ZlibResult {
-  unsigned char* data;
+  const unsigned char* data;
   unsigned long size;
 };
 
@@ -53,7 +53,7 @@ struct ZlibResult {
  *     )
  *   )
  */
-static const char* PADDINGS[] = {
+static const char* const PADDINGS[] = {
   "        ",        "       \t",       "      \t ",       "      \t\t",
   "     \t  ",       "     \t \t",      "     \t\t ",      "     \t\t\t",
   "    \t   ",       "    \t  \t",      "    \t \t ",      "    \t \t\t",
@@ -120,12 +120,12 @@ static const char* PADDINGS[] = {
   "\t\t\t\t\t\t  ",  "\t\t\t\t\t\t \t", "\t\t\t\t\t\t\t ", "\t\t\t\t\t\t\t\t",
 };
 
-static void fail(char* errorMessage) {
+static void fail(const char* const errorMessage) {
   fprintf(stderr, "%s", errorMessage);
   exit(1);
 }
 
-static bool isValidPrefix(char* prefix) {
+static bool isValidPrefix(const char* const prefix) {
   if (strlen(prefix) > 40) {
     return false;
   }
@@ -138,7 +138,7 @@ static bool isValidPrefix(char* prefix) {
   return true;
 }
 
-static char* getCommandOutput(char* command) {
+static const char* getCommandOutput(const char* const command) {
   FILE* pipe;
   char* output;
   uint32_t currentLength;
@@ -175,10 +175,10 @@ static char* getCommandOutput(char* command) {
   return output;
 }
 
-static unsigned char* convertPrefix(const char* prefix) {
-  size_t prefixLength = strlen(prefix);
-  uint8_t byteLength = (prefixLength + 1) / 2;
-  unsigned char* dataPrefix = malloc(byteLength);
+static const unsigned char* convertPrefix(const char* const prefix) {
+  const size_t prefixLength = strlen(prefix);
+  const uint8_t byteLength = (prefixLength + 1) / 2;
+  unsigned char* const dataPrefix = malloc(byteLength);
   uint8_t dataOffset;
   uint8_t hexOffset;
   for (dataOffset = 0, hexOffset = 0; hexOffset < prefixLength - 1; dataOffset++, hexOffset += 2) {
@@ -191,7 +191,12 @@ static unsigned char* convertPrefix(const char* prefix) {
   return dataPrefix;
 }
 
-static bool matchesPrefix(unsigned char* hash, unsigned char* dataPrefix, size_t dataPrefixLength, bool hasOddChar) {
+static bool matchesPrefix(
+  const unsigned char* const hash,
+  const unsigned char* const dataPrefix,
+  const size_t dataPrefixLength,
+  const bool hasOddChar
+) {
   return memcmp(hash, dataPrefix, dataPrefixLength) == 0 &&
     (
       !hasOddChar ||
@@ -199,7 +204,7 @@ static bool matchesPrefix(unsigned char* hash, unsigned char* dataPrefix, size_t
     );
 }
 
-static size_t numDigits(size_t value) {
+static size_t numDigits(const size_t value) {
   return (size_t)log10(value) + 1;
 }
 
@@ -218,7 +223,7 @@ static size_t getStartIndexOfLine(const char* message, const size_t desiredLine)
   return cursor - message;
 }
 
-static size_t getSplitIndex(const char* commitMessage) {
+static size_t getSplitIndex(const char* const commitMessage) {
   /*
    * If the commit has a GPG signature (detected by the presence of "gpgsig " at the start
    * of the fifth line), then add the padding whitespace immediately after the text "gpgsig ".
@@ -227,8 +232,8 @@ static size_t getSplitIndex(const char* commitMessage) {
    * If a signature is present, modifying the commit message would make the signature invalid.
    */
   const size_t fifthLineStartIndex = getStartIndexOfLine(commitMessage, 4);
-  const char* fifthLine = commitMessage + fifthLineStartIndex;
-  const char* marker = "gpgsig ";
+  const char* const fifthLine = commitMessage + fifthLineStartIndex;
+  const char* const marker = "gpgsig ";
 
   if (memcmp(fifthLine, marker, strlen(marker)) == 0) {
     return fifthLineStartIndex + strlen(marker);
@@ -237,21 +242,27 @@ static size_t getSplitIndex(const char* commitMessage) {
   }
 }
 
-static void* getMatch(void* params) {
+static void* getMatch(void* const params) {
   const struct HashSearchParams* searchParams = (struct HashSearchParams*)params;
-  const char* currentMessage = searchParams->currentMessage;
-  const char* desiredPrefix = searchParams->desiredPrefix;
+  const char* const currentMessage = searchParams->currentMessage;
+  const char* const desiredPrefix = searchParams->desiredPrefix;
+
   const size_t initialMessageLength = strlen(currentMessage);
   const size_t headerLength = strlen("commit ") + numDigits(initialMessageLength) + 1;
   const size_t messageLength = initialMessageLength + EXTENSION_LENGTH;
   const size_t dataLength = headerLength + messageLength;
-  char* messageData = malloc(dataLength + 1);
-  char* padding;
-  unsigned char* hash = malloc(SHA1_SIZE);
-  unsigned char* dataPrefix = convertPrefix(desiredPrefix);
+
+  char* const messageData = malloc(dataLength + 1);
+  const size_t splitIndex = getSplitIndex(currentMessage);
+  char* const padding = messageData + headerLength + splitIndex;;
+
+  unsigned char* const hash = malloc(SHA1_SIZE);
+
+  const unsigned char* const dataPrefix = convertPrefix(desiredPrefix);
   const size_t dataPrefixLength = strlen(desiredPrefix) / 2;
   const bool hasOddChar = strlen(desiredPrefix) % 2 == 1;
-  const size_t splitIndex = getSplitIndex(currentMessage);
+
+  uint64_t counter = searchParams->counterStart;
 
   if (messageData == NULL) {
     fail("Failed to allocate a new commit message\n");
@@ -268,15 +279,12 @@ static void* getMatch(void* params) {
     currentMessage + splitIndex,
     initialMessageLength - splitIndex + 1
   );
-  padding = messageData + headerLength + splitIndex;
-
-  uint64_t counter = searchParams->counterStart;
 
   do {
     for (uint8_t blockOffset = 0; blockOffset < EXTENSION_LENGTH; blockOffset += 8) {
       memcpy(padding + blockOffset, PADDINGS[(counter >> blockOffset) & 0xff], 8);
     }
-    SHA1((unsigned char*)messageData, dataLength, hash);
+    SHA1((const unsigned char*)messageData, dataLength, hash);
     counter++;
   } while (!matchesPrefix(hash, dataPrefix, dataPrefixLength, hasOddChar));
 
@@ -292,10 +300,10 @@ static void* getMatch(void* params) {
   return NULL;
 }
 
-static struct ZlibResult* compressObject(unsigned char* data, size_t size) {
+static const struct ZlibResult* compressObject(unsigned char* const data, const size_t size) {
   z_stream deflateStream;
   size_t outputSize = 2 * size;
-  unsigned char* output = malloc(outputSize);
+  unsigned char* const output = malloc(outputSize);
 
   deflateStream.zalloc = Z_NULL;
   deflateStream.zfree = Z_NULL;
@@ -309,14 +317,14 @@ static struct ZlibResult* compressObject(unsigned char* data, size_t size) {
   deflate(&deflateStream, Z_FINISH);
   deflateEnd(&deflateStream);
 
-  struct ZlibResult* result = malloc(sizeof(struct ZlibResult));
+  struct ZlibResult* const result = malloc(sizeof(struct ZlibResult));
   result->data = realloc(output, deflateStream.total_out);
   result->size = deflateStream.total_out;
 
   return result;
 }
 
-static void writeGitObject(unsigned char* hash, struct ZlibResult* object) {
+static void writeGitObject(const unsigned char* const hash, const struct ZlibResult* const object) {
   char dirName[strlen(".git/objects/") + 3];
   char fileName[strlen(".git/objects/") + SHA1_SIZE * 2 + 2];
 
@@ -334,7 +342,7 @@ static void writeGitObject(unsigned char* hash, struct ZlibResult* object) {
     fail("Failed to create .git/objects/xx directory\n");
   }
 
-  FILE* file = fopen(fileName, "w");
+  FILE* const file = fopen(fileName, "w");
   if (file == NULL) {
     fail("Failed to open git object file\n");
   }
@@ -346,7 +354,7 @@ static void writeGitObject(unsigned char* hash, struct ZlibResult* object) {
   fclose(file);
 }
 
-static void gitResetToHash(unsigned char* hash) {
+static void gitResetToHash(const unsigned char* const hash) {
   char command[strlen("git reset ") + SHA1_SIZE * 2 + 1];
   sprintf(command, "git reset ");
 
@@ -361,7 +369,7 @@ static void gitResetToHash(unsigned char* hash) {
 }
 
 static void luckyCommit(char* desiredPrefix) {
-  char* currentCommit = getCommandOutput("git cat-file commit HEAD");
+  const char* const currentCommit = getCommandOutput("git cat-file commit HEAD");
 
   const size_t NUM_THREADS = sysconf(_SC_NPROCESSORS_ONLN);
   pthread_t threads[NUM_THREADS];
@@ -407,13 +415,13 @@ static void luckyCommit(char* desiredPrefix) {
     fail("No threads found match\n");
   }
 
-  struct ZlibResult* compressedObject = compressObject((unsigned char*)match->data, match->size);
+  const struct ZlibResult* const compressedObject = compressObject((unsigned char*)match->data, match->size);
 
   writeGitObject(match->hash, compressedObject);
   gitResetToHash(match->hash);
 }
 
-int main(int argc, char** argv) {
+int main(const int argc, char** const argv) {
   if (argc == 1) {
     luckyCommit("0000000");
   } else if (argc == 2 && isValidPrefix(argv[1])) {
