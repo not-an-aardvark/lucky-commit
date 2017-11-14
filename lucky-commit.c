@@ -15,6 +15,27 @@
 #define SHA1_SIZE 20
 #define EXTENSION_LENGTH 64
 
+struct HashSearchParams {
+  const char* currentMessage;
+  const char* desiredPrefix;
+  const uint64_t counterStart;
+  bool* done;
+  struct HashMatch* resultLoc;
+  pthread_mutex_t* matchLock;
+  pthread_cond_t* notifyDone;
+};
+
+struct HashMatch {
+  char* data;
+  unsigned char* hash;
+  size_t size;
+};
+
+struct ZlibResult {
+  unsigned char* data;
+  unsigned long size;
+};
+
 /*
  * The 256 unique strings of length 8 which contain only ' ' and '\t'.
  * These are hardcoded so that commit padding strings can be generated with high
@@ -216,22 +237,6 @@ static size_t getSplitIndex(const char* commitMessage) {
   }
 }
 
-struct HashSearchParams {
-  const char* currentMessage;
-  const char* desiredPrefix;
-  const uint64_t counterStart;
-  bool* done;
-  struct HashMatch* resultLoc;
-  pthread_mutex_t* matchLock;
-  pthread_cond_t* notifyDone;
-};
-
-struct HashMatch {
-  char* data;
-  unsigned char* hash;
-  size_t size;
-};
-
 static void* getMatch(void* params) {
   const struct HashSearchParams* searchParams = (struct HashSearchParams*)params;
   const char* currentMessage = searchParams->currentMessage;
@@ -286,11 +291,6 @@ static void* getMatch(void* params) {
 
   return NULL;
 }
-
-struct ZlibResult {
-  unsigned char* data;
-  unsigned long size;
-};
 
 static struct ZlibResult* compressObject(unsigned char* data, size_t size) {
   z_stream deflateStream;
