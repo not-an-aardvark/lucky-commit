@@ -26,8 +26,6 @@ $ git log
 1010101 (HEAD -> master) Some commit
 ```
 
-On average, this requires the computation of 16<sup>7</sup> sha1 hashes, which takes about 90 seconds on my laptop.
-
 ## Why?
 
 ¯\\\_(ツ)_/¯
@@ -55,3 +53,20 @@ $ lucky-commit
 ```
 
 However, note that the Node.js package is about 10 times slower, and is not actively maintained.
+
+# Performance
+
+* `lucky-commit`'s main performance bottleneck is SHA1 throughput. On a single core of a 2015 MacBook Pro, OpenSSL's SHA1 implementation has a throughput of about 370 MB/s.
+* Long hash prefixes require more hash computations. The default hash prefix of `0000000` has length 7, so an average of 16<sup>7</sup> (or 2<sup>28</sup>) hashes are needed.
+* Large git commit objects increase the amount of data that needs to be hashed on each iteration.
+    * A git commit object with a short commit message is typically about 300 bytes.
+    * Adding a GPG signature to a commit increases the size by about 850 bytes.
+* Machines with more CPUs can compute more hashes. Hash searching is very parallelizable, so performance scales linearly with the number of CPUs.
+
+This means that on a 2015 MacBook Pro with 4 cores, searching for a `0000000` prefix on a commit with no GPG signature will ideally take an average of
+
+```
+(2^28 hashes) * (300 bytes/hash) / (370 MB/s/core) / (4 cores) = 52 seconds
+```
+
+Note that this calculation ignores the effect of any other processes running on the machine. In practice, I've found that `lucky-commit` takes about 100 seconds to run when there are a few other applications open.
