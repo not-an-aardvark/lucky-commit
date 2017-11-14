@@ -9,7 +9,7 @@ With this simple command, you can change the start of your git commit hashes to 
 ```bash
 $ git log
 1f6383a (HEAD -> master) Some commit
-$ ./lucky-commit
+$ lucky-commit
 $ git log
 0000000 (HEAD -> master) Some commit
 ```
@@ -26,8 +26,32 @@ $ git log
 1010101 (HEAD -> master) Some commit
 ```
 
-On average, this requires the computation of 16<sup>7</sup> sha1 hashes, which takes about 4 minutes on my laptop.
+On average, this requires the computation of 16<sup>7</sup> sha1 hashes, which takes about 90 seconds on my laptop.
 
 ## Why?
 
 ¯\\\_(ツ)_/¯
+
+## Installation
+
+* Requirements: `gcc`, `openssl`, `zlib`
+* Probably doesn't work on Windows
+
+```
+$ git clone https://github.com/not-an-aardvark/lucky-commit
+$ cd lucky-commit/
+$ make
+```
+
+This will create the `lucky-commit` binary in the current working directory. You can move this to wherever you want, or set up an alias for it.
+
+---
+
+For easier installation/Windows support, this tool can also be installed as Node.js package from `npm`.
+
+```
+$ npm install -g lucky-commit
+$ lucky-commit
+```
+
+However, note that the Node.js package is about 10 times slower, and is not actively maintained.
