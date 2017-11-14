@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <openssl/sha.h>
+#include <unistd.h>
 #include <zlib.h>
 
 #define SHA1_SIZE 20
@@ -362,12 +363,11 @@ static void gitResetToHash(unsigned char* hash) {
 static void luckyCommit(char* desiredPrefix) {
   char* currentCommit = getCommandOutput("git cat-file commit HEAD");
 
-  const size_t NUM_THREADS = 4;
+  const size_t NUM_THREADS = sysconf(_SC_NPROCESSORS_ONLN);
   pthread_t threads[NUM_THREADS];
   bool completions[NUM_THREADS];
   struct HashMatch results[NUM_THREADS];
   struct HashSearchParams params[NUM_THREADS];
-  uint64_t COUNTER_STARTS[] = { 0UL, 1UL << 62, 1UL << 63, (1UL << 63) + (1UL << 62) };
 
   pthread_mutex_t matchLock;
   pthread_cond_t notifyDone;
@@ -382,7 +382,7 @@ static void luckyCommit(char* desiredPrefix) {
     params[i] = (struct HashSearchParams){
       .currentMessage = currentCommit,
       .desiredPrefix = desiredPrefix,
-      .counterStart = COUNTER_STARTS[i],
+      .counterStart = (1UL << 63) / NUM_THREADS * i * 2,
       .done = &completions[i],
       .resultLoc = &results[i],
       .matchLock = &matchLock,
