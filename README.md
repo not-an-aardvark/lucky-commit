@@ -54,7 +54,7 @@ $ lucky-commit
 
 However, note that the Node.js package is about 10 times slower, and is not actively maintained.
 
-# Performance
+## Performance
 
 * `lucky-commit`'s main performance bottleneck is SHA1 throughput. On a single core of a 2015 MacBook Pro, OpenSSL's SHA1 implementation has a throughput of about 370 MB/s.
 * Long hash prefixes require more hash computations. The default hash prefix of `0000000` has length 7, so an average of 16<sup>7</sup> (or 2<sup>28</sup>) hashes are needed.
