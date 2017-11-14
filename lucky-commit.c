@@ -28,7 +28,7 @@
  *     )
  *   )
  */
-const char* PADDINGS[] = {
+static const char* PADDINGS[] = {
   "        ",        "       \t",       "      \t ",       "      \t\t",
   "     \t  ",       "     \t \t",      "     \t\t ",      "     \t\t\t",
   "    \t   ",       "    \t  \t",      "    \t \t ",      "    \t \t\t",
@@ -95,41 +95,12 @@ const char* PADDINGS[] = {
   "\t\t\t\t\t\t  ",  "\t\t\t\t\t\t \t", "\t\t\t\t\t\t\t ", "\t\t\t\t\t\t\t\t",
 };
 
-void fail(char* errorMessage) {
+static void fail(char* errorMessage) {
   fprintf(stderr, "%s", errorMessage);
   exit(1);
 }
 
-char* readFile(char* filename) {
-  FILE* file;
-  uint64_t size;
-  char* buffer;
-
-  file = fopen(filename, "r");
-
-  if (file == NULL) {
-    fail("Failed to open file\n");
-  }
-
-  fseek(file, 0L, SEEK_END);
-
-  size = ftell(file);
-  rewind(file);
-
-  buffer = malloc(size + 1);
-  buffer[size] = '\0';
-
-  if (buffer == NULL || fread(buffer, size, 1, file) != 1) {
-    fclose(file);
-    fail("Failed to read file\n");
-  }
-
-  fclose(file);
-
-  return buffer;
-}
-
-bool isValidPrefix(char* prefix) {
+static bool isValidPrefix(char* prefix) {
   if (strlen(prefix) > 40) {
     return false;
   }
@@ -142,7 +113,7 @@ bool isValidPrefix(char* prefix) {
   return true;
 }
 
-char* getCommandOutput(char* command) {
+static char* getCommandOutput(char* command) {
   FILE* pipe;
   char* output;
   uint32_t currentLength;
@@ -179,7 +150,7 @@ char* getCommandOutput(char* command) {
   return output;
 }
 
-unsigned char* convertPrefix(char* prefix) {
+static unsigned char* convertPrefix(char* prefix) {
   size_t prefixLength = strlen(prefix);
   uint8_t byteLength = (prefixLength + 1) / 2;
   unsigned char* dataPrefix = malloc(byteLength);
@@ -195,7 +166,7 @@ unsigned char* convertPrefix(char* prefix) {
   return dataPrefix;
 }
 
-bool matchesPrefix(unsigned char* hash, unsigned char* dataPrefix, size_t dataPrefixLength, bool hasOddChar) {
+static bool matchesPrefix(unsigned char* hash, unsigned char* dataPrefix, size_t dataPrefixLength, bool hasOddChar) {
   return memcmp(hash, dataPrefix, dataPrefixLength) == 0 &&
     (
       !hasOddChar ||
@@ -203,11 +174,11 @@ bool matchesPrefix(unsigned char* hash, unsigned char* dataPrefix, size_t dataPr
     );
 }
 
-size_t numDigits(size_t value) {
+static size_t numDigits(size_t value) {
   return (size_t)log10(value) + 1;
 }
 
-size_t getStartIndexOfLine(const char* message, const size_t desiredLine) {
+static size_t getStartIndexOfLine(const char* message, const size_t desiredLine) {
   const char* cursor;
   size_t lineNum = 0;
   for (cursor = message; lineNum < desiredLine; cursor++) {
@@ -222,7 +193,7 @@ size_t getStartIndexOfLine(const char* message, const size_t desiredLine) {
   return cursor - message;
 }
 
-size_t getSplitIndex(const char* commitMessage) {
+static size_t getSplitIndex(const char* commitMessage) {
   /*
    * If the commit has a GPG signature (detected by the presence of "gpgsig " at the start
    * of the fifth line), then add the padding whitespace immediately after the text "gpgsig ".
@@ -247,7 +218,7 @@ struct HashMatch {
   size_t size;
 };
 
-struct HashMatch* getMatch(char* currentMessage, char* desiredPrefix) {
+static struct HashMatch* getMatch(char* currentMessage, char* desiredPrefix) {
   const size_t initialMessageLength = strlen(currentMessage);
   const size_t headerLength = strlen("commit ") + numDigits(initialMessageLength) + 1;
   const size_t messageLength = initialMessageLength + EXTENSION_LENGTH;
@@ -300,7 +271,7 @@ struct ZlibResult {
   unsigned long size;
 };
 
-struct ZlibResult* compressObject(unsigned char* data, size_t size) {
+static struct ZlibResult* compressObject(unsigned char* data, size_t size) {
   z_stream deflateStream;
   size_t outputSize = 2 * size;
   unsigned char* output = malloc(outputSize);
@@ -324,7 +295,7 @@ struct ZlibResult* compressObject(unsigned char* data, size_t size) {
   return result;
 }
 
-void writeGitObject(unsigned char* hash, struct ZlibResult* object) {
+static void writeGitObject(unsigned char* hash, struct ZlibResult* object) {
   char dirName[strlen(".git/objects/") + 3];
   char fileName[strlen(".git/objects/") + SHA1_SIZE * 2 + 2];
 
@@ -354,7 +325,7 @@ void writeGitObject(unsigned char* hash, struct ZlibResult* object) {
   fclose(file);
 }
 
-void gitResetToHash(unsigned char* hash) {
+static void gitResetToHash(unsigned char* hash) {
   char command[strlen("git reset ") + SHA1_SIZE * 2 + 1];
   sprintf(command, "git reset ");
 
@@ -368,7 +339,7 @@ void gitResetToHash(unsigned char* hash) {
   getCommandOutput(command);
 }
 
-void luckyCommit(char* desiredPrefix) {
+static void luckyCommit(char* desiredPrefix) {
   char* currentCommit = getCommandOutput("git cat-file commit HEAD");
 
   struct HashMatch* match = getMatch(currentCommit, desiredPrefix);
