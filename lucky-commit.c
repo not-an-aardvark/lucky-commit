@@ -26,13 +26,13 @@ struct HashSearchParams {
 };
 
 struct HashMatch {
-  const char* data;
-  const unsigned char* hash;
+  const uint8_t* data;
+  const uint8_t* hash;
   size_t size;
 };
 
 struct ZlibResult {
-  const unsigned char* data;
+  const uint8_t* data;
   unsigned long size;
 };
 
@@ -175,10 +175,10 @@ static const char* getCommandOutput(const char* const command) {
   return output;
 }
 
-static const unsigned char* convertPrefix(const char* const prefix) {
+static const uint8_t* convertPrefix(const char* const prefix) {
   const size_t prefixLength = strlen(prefix);
   const uint8_t byteLength = (prefixLength + 1) / 2;
-  unsigned char* const dataPrefix = malloc(byteLength);
+  uint8_t* const dataPrefix = malloc(byteLength);
   uint8_t dataOffset;
   uint8_t hexOffset;
   for (dataOffset = 0, hexOffset = 0; hexOffset < prefixLength - 1; dataOffset++, hexOffset += 2) {
@@ -192,8 +192,8 @@ static const unsigned char* convertPrefix(const char* const prefix) {
 }
 
 static bool matchesPrefix(
-  const unsigned char* const hash,
-  const unsigned char* const dataPrefix,
+  const uint8_t* const hash,
+  const uint8_t* const dataPrefix,
   const size_t dataPrefixLength,
   const bool hasOddChar
 ) {
@@ -252,13 +252,13 @@ static void* getMatch(void* const params) {
   const size_t messageLength = initialMessageLength + EXTENSION_LENGTH;
   const size_t dataLength = headerLength + messageLength;
 
-  char* const messageData = malloc(dataLength + 1);
+  uint8_t* const messageData = malloc(dataLength + 1);
   const size_t splitIndex = getSplitIndex(currentMessage);
-  char* const padding = messageData + headerLength + splitIndex;;
+  uint8_t* const padding = messageData + headerLength + splitIndex;;
 
-  unsigned char* const hash = malloc(SHA1_SIZE);
+  uint8_t* const hash = malloc(SHA1_SIZE);
 
-  const unsigned char* const dataPrefix = convertPrefix(desiredPrefix);
+  const uint8_t* const dataPrefix = convertPrefix(desiredPrefix);
   const size_t dataPrefixLength = strlen(desiredPrefix) / 2;
   const bool hasOddChar = strlen(desiredPrefix) % 2 == 1;
 
@@ -272,7 +272,7 @@ static void* getMatch(void* const params) {
     fail("Error: expected the current commit message to end in a newline\n");
   }
 
-  sprintf(messageData, "commit %zu", messageLength);
+  sprintf((char*)messageData, "commit %zu", messageLength);
   memcpy(messageData + headerLength, currentMessage, splitIndex);
   memcpy(
     messageData + headerLength + splitIndex + EXTENSION_LENGTH,
@@ -284,7 +284,7 @@ static void* getMatch(void* const params) {
     for (uint8_t blockOffset = 0; blockOffset < EXTENSION_LENGTH; blockOffset += 8) {
       memcpy(padding + blockOffset, PADDINGS[(counter >> blockOffset) & 0xff], 8);
     }
-    SHA1((const unsigned char*)messageData, dataLength, hash);
+    SHA1(messageData, dataLength, hash);
     counter++;
   } while (!matchesPrefix(hash, dataPrefix, dataPrefixLength, hasOddChar));
 
@@ -300,16 +300,16 @@ static void* getMatch(void* const params) {
   return NULL;
 }
 
-static const struct ZlibResult* compressObject(unsigned char* const data, const size_t size) {
+static const struct ZlibResult* compressObject(const uint8_t* const data, const size_t size) {
   z_stream deflateStream;
   size_t outputSize = 2 * size;
-  unsigned char* const output = malloc(outputSize);
+  uint8_t* const output = malloc(outputSize);
 
   deflateStream.zalloc = Z_NULL;
   deflateStream.zfree = Z_NULL;
   deflateStream.opaque = Z_NULL;
   deflateStream.avail_in = size;
-  deflateStream.next_in = data;
+  deflateStream.next_in = (uint8_t*)data;
   deflateStream.avail_out = outputSize;
   deflateStream.next_out = output;
 
@@ -324,7 +324,7 @@ static const struct ZlibResult* compressObject(unsigned char* const data, const 
   return result;
 }
 
-static void writeGitObject(const unsigned char* const hash, const struct ZlibResult* const object) {
+static void writeGitObject(const uint8_t* const hash, const struct ZlibResult* const object) {
   char dirName[strlen(".git/objects/") + 3];
   char fileName[strlen(".git/objects/") + SHA1_SIZE * 2 + 2];
 
@@ -354,7 +354,7 @@ static void writeGitObject(const unsigned char* const hash, const struct ZlibRes
   fclose(file);
 }
 
-static void gitResetToHash(const unsigned char* const hash) {
+static void gitResetToHash(const uint8_t* const hash) {
   char command[strlen("git reset ") + SHA1_SIZE * 2 + 1];
   sprintf(command, "git reset ");
 
@@ -415,7 +415,7 @@ static void luckyCommit(char* desiredPrefix) {
     fail("No threads found match\n");
   }
 
-  const struct ZlibResult* const compressedObject = compressObject((unsigned char*)match->data, match->size);
+  const struct ZlibResult* const compressedObject = compressObject(match->data, match->size);
 
   writeGitObject(match->hash, compressedObject);
   gitResetToHash(match->hash);
