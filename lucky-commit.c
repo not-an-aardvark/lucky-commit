@@ -207,6 +207,40 @@ size_t numDigits(size_t value) {
   return (size_t)log10(value) + 1;
 }
 
+size_t getStartIndexOfLine(const char* message, const size_t desiredLine) {
+  const char* cursor;
+  size_t lineNum = 0;
+  for (cursor = message; lineNum < desiredLine; cursor++) {
+    switch (*cursor) {
+      case '\n':
+        lineNum++;
+        break;
+      case '\0':
+        return cursor - message;
+    }
+  }
+  return cursor - message;
+}
+
+size_t getSplitIndex(const char* commitMessage) {
+  /*
+   * If the commit has a GPG signature (detected by the presence of "gpgsig " at the start
+   * of the fifth line), then add the padding whitespace immediately after the text "gpgsig ".
+   * Otherwise, add the padding whitespace right before the end of the commit message.
+   *
+   * If a signature is present, modifying the commit message would make the signature invalid.
+   */
+  const size_t fifthLineStartIndex = getStartIndexOfLine(commitMessage, 4);
+  const char* fifthLine = commitMessage + fifthLineStartIndex;
+  const char* marker = "gpgsig ";
+
+  if (memcmp(fifthLine, marker, strlen(marker)) == 0) {
+    return fifthLineStartIndex + strlen(marker);
+  } else {
+    return strlen(commitMessage) - 1;
+  }
+}
+
 struct HashMatch {
   char* data;
   unsigned char* hash;
@@ -224,6 +258,7 @@ struct HashMatch* getMatch(char* currentMessage, char* desiredPrefix) {
   unsigned char* dataPrefix = convertPrefix(desiredPrefix);
   const size_t dataPrefixLength = strlen(desiredPrefix) / 2;
   const bool hasOddChar = strlen(desiredPrefix) % 2 == 1;
+  const size_t splitIndex = getSplitIndex(currentMessage);
 
   if (messageData == NULL) {
     fail("Failed to allocate a new commit message\n");
@@ -234,10 +269,13 @@ struct HashMatch* getMatch(char* currentMessage, char* desiredPrefix) {
   }
 
   sprintf(messageData, "commit %zu", messageLength);
-  memcpy(messageData + headerLength, currentMessage, initialMessageLength - 1);
-  messageData[dataLength - 1] = '\n';
-  messageData[dataLength] = '\0';
-  padding = messageData + headerLength + initialMessageLength - 1;
+  memcpy(messageData + headerLength, currentMessage, splitIndex);
+  memcpy(
+    messageData + headerLength + splitIndex + EXTENSION_LENGTH,
+    currentMessage + splitIndex,
+    initialMessageLength - splitIndex + 1
+  );
+  padding = messageData + headerLength + splitIndex;
 
   uint64_t counter = 0;
 
