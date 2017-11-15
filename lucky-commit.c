@@ -13,7 +13,6 @@
 #include <zlib.h>
 
 #define SHA1_SIZE 20
-#define EXTENSION_LENGTH 64
 
 struct HashMatch {
   const uint8_t* data;
@@ -31,6 +30,7 @@ struct HashSearchParams {
   const char* const currentMessage;
   const char* const desiredPrefix;
   const uint64_t counterStart;
+  const uint8_t extensionWordLength;
   struct HashMatchContainer* resultContainer;
 };
 
@@ -249,10 +249,11 @@ static void* getMatch(void* const params) {
   const struct HashSearchParams* searchParams = (struct HashSearchParams*)params;
   const char* const currentMessage = searchParams->currentMessage;
   const char* const desiredPrefix = searchParams->desiredPrefix;
+  const uint8_t extensionLength = searchParams->extensionWordLength * 8;
 
   const size_t initialMessageLength = strlen(currentMessage);
   const size_t headerLength = strlen("commit ") + numDigits(initialMessageLength) + 1;
-  const size_t messageLength = initialMessageLength + EXTENSION_LENGTH;
+  const size_t messageLength = initialMessageLength + extensionLength;
   const size_t dataLength = headerLength + messageLength;
 
   uint8_t* const messageData = malloc(dataLength + 1);
@@ -278,13 +279,13 @@ static void* getMatch(void* const params) {
   sprintf((char*)messageData, "commit %zu", messageLength);
   memcpy(messageData + headerLength, currentMessage, splitIndex);
   memcpy(
-    messageData + headerLength + splitIndex + EXTENSION_LENGTH,
+    messageData + headerLength + splitIndex + extensionLength,
     currentMessage + splitIndex,
     initialMessageLength - splitIndex + 1
   );
 
   do {
-    for (uint8_t blockOffset = 0; blockOffset < EXTENSION_LENGTH; blockOffset += 8) {
+    for (uint8_t blockOffset = 0; blockOffset < extensionLength; blockOffset += 8) {
       memcpy(padding + blockOffset, PADDINGS[(counter >> blockOffset) & 0xff], 8);
     }
     SHA1(messageData, dataLength, hash);
@@ -391,6 +392,7 @@ static void luckyCommit(char* desiredPrefix) {
       .currentMessage = currentCommit,
       .desiredPrefix = desiredPrefix,
       .counterStart = (1UL << 63) / NUM_THREADS * i * 2,
+      .extensionWordLength = 8,
       .resultContainer = &result
     };
     if (pthread_create(&threads[i], NULL, getMatch, &params[i]) != 0) {
