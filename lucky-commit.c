@@ -15,20 +15,23 @@
 #define SHA1_SIZE 20
 #define EXTENSION_LENGTH 64
 
-struct HashSearchParams {
-  const char* const currentMessage;
-  const char* const desiredPrefix;
-  const uint64_t counterStart;
-  bool* const done;
-  struct HashMatch* const resultLoc;
-  pthread_mutex_t* const matchLock;
-  pthread_cond_t* const notifyDone;
-};
-
 struct HashMatch {
   const uint8_t* data;
   const uint8_t* hash;
   size_t size;
+};
+
+struct HashMatchContainer {
+  struct HashMatch match;
+  pthread_mutex_t lock;
+  pthread_cond_t done;
+};
+
+struct HashSearchParams {
+  const char* const currentMessage;
+  const char* const desiredPrefix;
+  const uint64_t counterStart;
+  struct HashMatchContainer* resultContainer;
 };
 
 struct ZlibResult {
@@ -288,14 +291,16 @@ static void* getMatch(void* const params) {
     counter++;
   } while (!matchesPrefix(hash, dataPrefix, dataPrefixLength, hasOddChar));
 
-  searchParams->resultLoc->data = messageData;
-  searchParams->resultLoc->hash = hash;
-  searchParams->resultLoc->size = dataLength;
-  *(searchParams->done) = true;
+  struct HashMatchContainer* const resultContainer = searchParams->resultContainer;
 
-  pthread_mutex_lock(searchParams->matchLock);
-  pthread_cond_signal(searchParams->notifyDone);
-  pthread_mutex_unlock(searchParams->matchLock);
+  pthread_mutex_lock(&resultContainer->lock);
+
+  resultContainer->match.data = messageData;
+  resultContainer->match.hash = hash;
+  resultContainer->match.size = dataLength;
+
+  pthread_cond_signal(&resultContainer->done);
+  pthread_mutex_unlock(&resultContainer->lock);
 
   return NULL;
 }
@@ -373,52 +378,31 @@ static void luckyCommit(char* desiredPrefix) {
 
   const size_t NUM_THREADS = sysconf(_SC_NPROCESSORS_ONLN);
   pthread_t threads[NUM_THREADS];
-  bool completions[NUM_THREADS];
-  struct HashMatch results[NUM_THREADS];
   struct HashSearchParams params[NUM_THREADS];
+  struct HashMatchContainer result;
 
-  pthread_mutex_t matchLock;
-  pthread_cond_t notifyDone;
-  struct HashMatch* match = NULL;
+  pthread_mutex_init(&result.lock, NULL);
+  pthread_cond_init(&result.done, NULL);
 
-  pthread_mutex_init(&matchLock, NULL);
-  pthread_cond_init(&notifyDone, NULL);
-
-  pthread_mutex_lock(&matchLock);
+  pthread_mutex_lock(&result.lock);
   for (size_t i = 0; i < NUM_THREADS; i++) {
-    completions[i] = false;
     params[i] = (struct HashSearchParams){
       .currentMessage = currentCommit,
       .desiredPrefix = desiredPrefix,
       .counterStart = (1UL << 63) / NUM_THREADS * i * 2,
-      .done = &completions[i],
-      .resultLoc = &results[i],
-      .matchLock = &matchLock,
-      .notifyDone = &notifyDone
+      .resultContainer = &result
     };
     if (pthread_create(&threads[i], NULL, getMatch, &params[i]) != 0) {
       fail("Failed to create pthread\n");
     }
   }
-  pthread_cond_wait(&notifyDone, &matchLock);
 
-  for (size_t i = 0; i < NUM_THREADS; i++) {
-    pthread_kill(threads[i], 0);
-    if (completions[i]) {
-      match = &results[i];
-      break;
-    }
-  }
-  pthread_mutex_unlock(&matchLock);
+  pthread_cond_wait(&result.done, &result.lock);
 
-  if (match == NULL) {
-    fail("No threads found match\n");
-  }
+  const struct ZlibResult* const compressedObject = compressObject(result.match.data, result.match.size);
 
-  const struct ZlibResult* const compressedObject = compressObject(match->data, match->size);
-
-  writeGitObject(match->hash, compressedObject);
-  gitResetToHash(match->hash);
+  writeGitObject(result.match.hash, compressedObject);
+  gitResetToHash(result.match.hash);
 }
 
 int main(const int argc, char** const argv) {
