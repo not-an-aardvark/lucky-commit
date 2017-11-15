@@ -14,6 +14,8 @@
 
 #define SHA1_SIZE 20
 
+#define fail(...) fprintf(stderr, __VA_ARGS__); exit(1);
+
 struct HashMatch {
   const uint8_t* data;
   const uint8_t* hash;
@@ -123,11 +125,6 @@ static const char* const PADDINGS[] = {
   "\t\t\t\t\t\t  ",  "\t\t\t\t\t\t \t", "\t\t\t\t\t\t\t ", "\t\t\t\t\t\t\t\t",
 };
 
-static void fail(const char* const errorMessage) {
-  fprintf(stderr, "%s", errorMessage);
-  exit(1);
-}
-
 static bool isValidPrefix(const char* const prefix) {
   if (strlen(prefix) > 40) {
     return false;
@@ -151,7 +148,7 @@ static const char* getCommandOutput(const char* const command) {
   pipe = popen(command, "r");
 
   if (pipe == NULL) {
-    fprintf(stderr, "Failed to spawn git process\n");
+    fprintf(stderr, "Failed to spawn '%s'\n", command);
     exit(1);
   }
 
@@ -159,20 +156,20 @@ static const char* getCommandOutput(const char* const command) {
   output = malloc(chunkSize);
 
   if (output == NULL) {
-    fail("Failed to allocate output buffer\n");
+    fail("Failed to allocate output buffer for '%s'\n", command);
   }
 
   while ((bytesRead = fread(output + currentLength, 1, chunkSize, pipe)) == chunkSize) {
     currentLength += chunkSize;
     output = realloc(output, currentLength + chunkSize);
     if (output == NULL) {
-      fail("Failed to allocate output buffer\n");
+      fail("Failed to allocate output buffer for '%s'\n", command);
     }
   }
   output[currentLength + bytesRead] = '\0';
 
   if (pclose(pipe) != 0) {
-    fail("Git command failed\n");
+    fail("Command '%s' failed\n", command);
   }
 
   return output;
@@ -346,17 +343,17 @@ static void writeGitObject(const uint8_t* const hash, const struct ZlibResult* c
   }
 
   if (mkdir(dirName, 755) != 0 && errno != EEXIST) {
-    fail("Failed to create .git/objects/xx directory\n");
+    fail("Failed to create %s directory\n", dirName);
   }
 
   FILE* const file = fopen(fileName, "w");
   if (file == NULL) {
-    fail("Failed to open git object file\n");
+    fail("Failed to open %s\n", fileName);
   }
 
   if (fwrite(object->data, 1, object->size, file) != object->size) {
     fclose(file);
-    fail("Failed to write git object file\n");
+    fail("Failed to write to %s\n", fileName);
   }
   fclose(file);
 }
@@ -396,7 +393,7 @@ static void luckyCommit(char* desiredPrefix) {
       .resultContainer = &result
     };
     if (pthread_create(&threads[i], NULL, getMatch, &params[i]) != 0) {
-      fail("Failed to create pthread\n");
+      fail("Failed to create pthread for hash searching\n");
     }
   }
 
