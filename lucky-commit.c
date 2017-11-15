@@ -145,7 +145,7 @@ static const char* getCommandOutput(const char* const command) {
   FILE* pipe;
   char* output;
   uint32_t currentLength;
-  const int chunkSize = 8;
+  const int chunkSize = 256;
   size_t bytesRead;
 
   pipe = popen(command, "r");
