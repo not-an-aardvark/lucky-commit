@@ -306,17 +306,18 @@ static void* getMatch(void* const params) {
 }
 
 static const struct ZlibResult* compressObject(const uint8_t* const data, const size_t size) {
-  z_stream deflateStream;
   size_t outputSize = 2 * size;
   uint8_t* const output = malloc(outputSize);
 
-  deflateStream.zalloc = Z_NULL;
-  deflateStream.zfree = Z_NULL;
-  deflateStream.opaque = Z_NULL;
-  deflateStream.avail_in = size;
-  deflateStream.next_in = (uint8_t*)data;
-  deflateStream.avail_out = outputSize;
-  deflateStream.next_out = output;
+  z_stream deflateStream = (z_stream){
+    .zalloc = Z_NULL,
+    .zfree = Z_NULL,
+    .opaque = Z_NULL,
+    .avail_in = size,
+    .next_in = (uint8_t*)data,
+    .avail_out = outputSize,
+    .next_out = output
+  };
 
   deflateInit(&deflateStream, Z_DEFAULT_COMPRESSION);
   deflate(&deflateStream, Z_FINISH);
