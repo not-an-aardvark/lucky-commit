@@ -340,7 +340,7 @@ static void writeGitObject(const uint8_t* const hash, const struct ZlibResult* c
     sprintf(fileName + stringOffset, "%02x", hash[hashIndex]);
   }
 
-  if (mkdir(dirName, 755) != 0 && errno != EEXIST) {
+  if (mkdir(dirName, 0755) != 0 && errno != EEXIST) {
     fail("Failed to create %s directory\n", dirName);
   }
 
