@@ -139,13 +139,11 @@ static bool isValidPrefix(const char* const prefix) {
 }
 
 static const char* getCommandOutput(const char* const command) {
-  FILE* pipe;
   char* output;
   uint32_t currentLength;
   const int chunkSize = 256;
   size_t bytesRead;
-
-  pipe = popen(command, "r");
+  FILE* const pipe = popen(command, "r");
 
   if (pipe == NULL) {
     fprintf(stderr, "Failed to spawn '%s'\n", command);
