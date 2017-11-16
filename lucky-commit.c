@@ -14,7 +14,7 @@
 
 #define SHA1_SIZE 20
 
-#define fail(...) fprintf(stderr, __VA_ARGS__); exit(1);
+#define fail(...) (fprintf(stderr, __VA_ARGS__), exit(1))
 
 struct HashMatch {
   const uint8_t* data;
