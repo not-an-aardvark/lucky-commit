@@ -18,7 +18,7 @@ As a demonstration, see the latest commit in this repository.
 
 ## How?
 
-lucky-commit amends your commits by adding a few characters of various types of whitespace, and keeps hashing new messages until it gets the right value. By default, it will keep searching until it finds a hash starting with "0000000", but this can be changed by simply passing the desired hash as a parameter.
+lucky-commit amends your commits by adding a few characters of various types of whitespace, and keeps hashing new messages until it gets the right value. By default, it will keep searching until it finds a hash starting with "0000000", but this can be changed by simply passing the desired hash as an argument.
 
 ```bash
 $ lucky-commit 1010101
