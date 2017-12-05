@@ -32,8 +32,8 @@ $ git log
 
 ## Installation
 
-* Requirements: `gcc`, `openssl`, `zlib`
-* Probably doesn't work on Windows
+* Requirements: `gcc`, `openssl`, `zlib` (depending on your system, you probably already have these installed)
+* Doesn't work on Windows
 
 ```
 $ git clone https://github.com/not-an-aardvark/lucky-commit
