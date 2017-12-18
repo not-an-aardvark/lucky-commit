@@ -1,0 +1,9 @@
+[package]
+name = "lucky_commit"
+version = "0.1.0"
+authors = ["Teddy Katz <teddy.katz@gmail.com>"]
+
+[dependencies]
+
+flate2 = "1.0"
+rust-crypto = "^0.2"

@@ -32,29 +32,28 @@ $ git log
 
 ## Installation
 
-* Requirements: `gcc`, `openssl`, `zlib` (depending on your system, you probably already have these installed)
-* Doesn't work on Windows
+I've rewritten the `lucky-commit` project several times as a method to learn new programming languages. As a result, there are multiple different implementations of `lucky-commit` in different languages.
 
-```
-$ git clone https://github.com/not-an-aardvark/lucky-commit
-$ cd lucky-commit/
-$ make
-```
+The latest version is written in **Rust**. To install it:
 
-This will create the `lucky-commit` binary in the current working directory. You can move this to wherever you want, or set up an alias for it.
+* Make sure you have `rustc` and `cargo` installed. Installation instructions can be found [here](https://doc.rust-lang.org/book/second-edition/ch01-01-installation.html).
 
----
+    ```
+    $ git clone https://github.com/not-an-aardvark/lucky-commit
+    $ cd lucky-commit/
+    $ cargo build --release
+    ```
 
-For easier installation/Windows support, this tool can also be installed as Node.js package from `npm`.
+    This will create the `lucky_commit` binary in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
 
-```
-$ npm install -g lucky-commit
-$ lucky-commit
-```
+To install an older version, see the instructions in the `README.md` file on the corresponding branch:
 
-However, note that the Node.js package is about 10 times slower, and is not actively maintained.
+* **C** (see the `C` branch of this repository)
+* **Node.js** (see the `nodejs` branch of this repository)
 
 ## Performance
+
+> Note: The Rust implementation of `lucky-commit` does not yet use threading. For maximum performance, you should use the C implementation.
 
 * `lucky-commit`'s main performance bottleneck is SHA1 throughput. On a single core of a 2015 MacBook Pro, OpenSSL's SHA1 implementation has a throughput of about 370 MB/s.
 * Long hash prefixes require more hash computations. The default hash prefix of `0000000` has length 7, so an average of 16<sup>7</sup> (or 2<sup>28</sup>) hashes are needed.
