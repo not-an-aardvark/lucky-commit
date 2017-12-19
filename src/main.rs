@@ -73,13 +73,13 @@ fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
 
     let parsed_prefix = HashPrefix {
         data,
-        half_byte: match prefix.len() % 2 {
-            0 => None,
-            1 => match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
+        half_byte: if prefix.len() % 2 == 1 {
+            match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
                 Ok(value) => Some(value << 4),
                 Err(_) => return None
-            },
-            _ => unreachable!()
+            }
+        } else {
+            None
         }
     };
 
