@@ -91,14 +91,7 @@ fn run_lucky_commit(desired_prefix: HashPrefix) {
     let current_message = &String::from_utf8(current_message_bytes)
         .expect("Git commit contains invalid utf8");
 
-    let search_params = SearchParams {
-        current_message,
-        desired_prefix,
-        counter_range: ops::Range { start: 0, end: std::u64::MAX },
-        extension_word_length: 8
-    };
-
-    match search_for_match(&search_params) {
+    match find_match(current_message, desired_prefix) {
         Some(hash_match) => {
             create_git_object_file(&hash_match);
             git_reset_to_hash(&hash_match.hash);
@@ -121,7 +114,18 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
     output.stdout
 }
 
-fn search_for_match(params: &SearchParams) -> Option<HashMatch> {
+fn find_match(current_message: &str, desired_prefix: HashPrefix) -> Option<HashMatch> {
+    let search_params = &SearchParams {
+        current_message,
+        desired_prefix,
+        counter_range: ops::Range { start: 0, end: std::u64::MAX },
+        extension_word_length: 8
+    };
+
+    iterate_for_match(search_params)
+}
+
+fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     let desired_prefix = &params.desired_prefix;
     let extension_length = params.extension_word_length * 8;
     let processed_message = process_commit_message(
