@@ -1,5 +1,6 @@
 extern crate crypto;
 extern crate flate2;
+extern crate num_cpus;
 
 mod padding;
 
@@ -12,6 +13,8 @@ use std::io::Write;
 use std::ops;
 use std::process;
 use std::str;
+use std::sync::mpsc;
+use std::thread;
 use std::u8;
 use crypto::digest::Digest;
 use crypto::sha1;
@@ -25,7 +28,7 @@ struct HashPrefix {
 
 struct SearchParams<'a> {
     current_message: &'a str,
-    desired_prefix: HashPrefix,
+    desired_prefix: &'a HashPrefix,
     counter_range: ops::Range<u64>,
     extension_word_length: usize
 }
@@ -44,9 +47,9 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     match args.len() {
-        1 => run_lucky_commit(parse_prefix("0000000").unwrap()),
+        1 => run_lucky_commit(&parse_prefix("0000000").unwrap()),
         2 => match parse_prefix(&args[1]) {
-            Some(prefix) => run_lucky_commit(prefix),
+            Some(prefix) => run_lucky_commit(&prefix),
             None => print_usage_and_exit()
         },
         _ => print_usage_and_exit()
@@ -86,7 +89,7 @@ fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
     Some(parsed_prefix)
 }
 
-fn run_lucky_commit(desired_prefix: HashPrefix) {
+fn run_lucky_commit(desired_prefix: &HashPrefix) {
     let current_message_bytes = run_command("git", &["cat-file", "commit", "HEAD"]);
     let current_message = &String::from_utf8(current_message_bytes)
         .expect("Git commit contains invalid utf8");
@@ -114,15 +117,51 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
     output.stdout
 }
 
-fn find_match(current_message: &str, desired_prefix: HashPrefix) -> Option<HashMatch> {
-    let search_params = &SearchParams {
-        current_message,
-        desired_prefix,
-        counter_range: ops::Range { start: 0, end: std::u64::MAX },
-        extension_word_length: 8
-    };
+fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<HashMatch> {
+    let num_threads = num_cpus::get();
+    let (shared_sender, receiver) = mpsc::channel();
 
-    iterate_for_match(search_params)
+    for thread_index in 0..num_threads {
+        let thread_sender = mpsc::Sender::clone(&shared_sender);
+        let message_copy = current_message.to_owned();
+        let prefix_copy = HashPrefix {
+            data: desired_prefix.data.to_owned(),
+            half_byte: desired_prefix.half_byte.to_owned()
+        };
+        thread::spawn(move || {
+            let params = SearchParams {
+                current_message: &message_copy,
+                desired_prefix: &prefix_copy,
+                counter_range: get_u64_range_segment(num_threads, thread_index),
+                extension_word_length: 8
+            };
+            match thread_sender.send(iterate_for_match(&params)) {
+                /*
+                 * If an error occurs when sending, then the receiver has already received
+                 * a match from another thread, so ignore the error.
+                 */
+                Ok(_) => (),
+                Err(_) => ()
+            }
+        });
+    }
+
+    for _ in 0..num_threads {
+        let result = receiver.recv().unwrap();
+        if result.is_some() {
+            return result;
+        }
+    }
+
+    None
+}
+
+fn get_u64_range_segment(total_segments: usize, current_segment: usize) -> ops::Range<u64> {
+    let divisor = total_segments as u64;
+    let multiplier = current_segment as u64;
+    let counter_start = (1u64 << 63) / divisor * multiplier * 2;
+    let counter_end = (1u64 << 63) / divisor * (multiplier + 1) * 2 - 1;
+    counter_start..counter_end
 }
 
 fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {

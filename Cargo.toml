@@ -6,4 +6,5 @@ authors = ["Teddy Katz <teddy.katz@gmail.com>"]
 [dependencies]
 
 flate2 = "1.0"
+num_cpus = "1.0"
 rust-crypto = "^0.2"

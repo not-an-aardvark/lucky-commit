@@ -53,8 +53,6 @@ To install an older version, see the instructions in the `README.md` file on the
 
 ## Performance
 
-> Note: The Rust implementation of `lucky-commit` does not yet use threading. For maximum performance, you should use the C implementation.
-
 * `lucky-commit`'s main performance bottleneck is SHA1 throughput. On a single core of a 2015 MacBook Pro, OpenSSL's SHA1 implementation has a throughput of about 370 MB/s.
 * Long hash prefixes require more hash computations. The default hash prefix of `0000000` has length 7, so an average of 16<sup>7</sup> (or 2<sup>28</sup>) hashes are needed.
 * Large git commit objects increase the amount of data that needs to be hashed on each iteration.
