@@ -48,8 +48,8 @@ The latest version is written in **Rust**. To install it:
 
 To install an older version, see the instructions in the `README.md` file on the corresponding branch:
 
-* **C** (see the `C` branch of this repository)
-* **Node.js** (see the `nodejs` branch of this repository)
+* **C** (see the [`C` branch](https://github.com/not-an-aardvark/lucky-commit/tree/C) of this repository)
+* **Node.js** (see the [`nodejs` branch](https://github.com/not-an-aardvark/lucky-commit/tree/nodejs) of this repository)
 
 ## Performance
 
