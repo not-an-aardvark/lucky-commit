@@ -15,6 +15,7 @@ use std::process;
 use std::str;
 use std::sync::mpsc;
 use std::thread;
+use std::u64;
 use std::u8;
 use crypto::digest::Digest;
 use crypto::sha1;
@@ -129,16 +130,18 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
 fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<HashMatch> {
     let num_threads = num_cpus::get();
     let (shared_sender, receiver) = mpsc::channel();
+    let u64_ranges = split_range(0, u64::MAX, num_threads);
 
     for thread_index in 0..num_threads {
         let thread_sender = mpsc::Sender::clone(&shared_sender);
         let thread_message_copy = current_message.to_owned();
         let thread_prefix_copy = desired_prefix.clone();
+        let counter_range_copy = u64_ranges[thread_index].clone();
         thread::spawn(move || {
             let thread_params = SearchParams {
                 current_message: &thread_message_copy,
                 desired_prefix: &thread_prefix_copy,
-                counter_range: get_u64_range_segment(num_threads, thread_index),
+                counter_range: counter_range_copy,
                 extension_word_length: 8
             };
             match thread_sender.send(iterate_for_match(&thread_params)) {
@@ -162,12 +165,17 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
     None
 }
 
-fn get_u64_range_segment(total_segments: usize, current_segment: usize) -> ops::Range<u64> {
-    let divisor = total_segments as u64;
-    let multiplier = current_segment as u64;
-    let counter_start = (1u64 << 63) / divisor * multiplier * 2;
-    let counter_end = (1u64 << 63) / divisor * (multiplier + 1) * 2 - 1;
-    counter_start..counter_end
+fn split_range(min: u64, max: u64, num_segments: usize) -> Vec<ops::Range<u64>> {
+    let segment_size = (max - min) / (num_segments as u64);
+
+    let mut segments = Vec::new();
+    let mut last_range_end = 0;
+    for _ in 0..num_segments {
+        segments.push(last_range_end..last_range_end + segment_size);
+        last_range_end += segment_size;
+    }
+
+    segments
 }
 
 fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
