@@ -165,7 +165,7 @@ fn get_u64_range_segment(total_segments: usize, current_segment: usize) -> ops::
 }
 
 fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
-    let desired_prefix = &params.desired_prefix;
+    let desired_prefix = params.desired_prefix;
     let extension_length = params.extension_word_length * 8;
     let processed_message = process_commit_message(
         params.current_message,
