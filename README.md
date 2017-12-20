@@ -36,7 +36,7 @@ I've rewritten the `lucky-commit` project several times as a method to learn new
 
 The latest version is written in **Rust**. To install it:
 
-* Make sure you have `rustc` and `cargo` installed. Installation instructions can be found [here](https://doc.rust-lang.org/book/second-edition/ch01-01-installation.html).
+* Make sure you have `rustc` and `cargo` installed. Installation instructions can be found [here](https://doc.rust-lang.org/book/second-edition/ch01-01-installation.html#installation).
 
     ```
     $ git clone https://github.com/not-an-aardvark/lucky-commit
