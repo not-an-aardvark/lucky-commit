@@ -36,9 +36,9 @@ impl Clone for HashPrefix {
     }
 }
 
-struct SearchParams<'a> {
-    current_message: &'a str,
-    desired_prefix: &'a HashPrefix,
+struct SearchParams {
+    current_message: String,
+    desired_prefix: HashPrefix,
     counter_range: ops::Range<u64>,
     extension_word_length: usize
 }
@@ -133,26 +133,15 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
     let u64_ranges = split_range(0, u64::MAX, num_threads);
 
     for thread_index in 0..num_threads {
-        let thread_sender = mpsc::Sender::clone(&shared_sender);
-        let thread_message_copy = current_message.to_owned();
-        let thread_prefix_copy = desired_prefix.clone();
-        let counter_range_copy = u64_ranges[thread_index].clone();
-        thread::spawn(move || {
-            let thread_params = SearchParams {
-                current_message: &thread_message_copy,
-                desired_prefix: &thread_prefix_copy,
-                counter_range: counter_range_copy,
+        spawn_hash_searcher(
+            mpsc::Sender::clone(&shared_sender),
+            SearchParams {
+                current_message: current_message.to_owned(),
+                desired_prefix: desired_prefix.clone(),
+                counter_range: u64_ranges[thread_index].clone(),
                 extension_word_length: 8
-            };
-            match thread_sender.send(iterate_for_match(&thread_params)) {
-                /*
-                 * If an error occurs when sending, then the receiver has already received
-                 * a match from another thread, so ignore the error.
-                 */
-                Ok(_) => (),
-                Err(_) => ()
             }
-        });
+        );
     }
 
     for _ in 0..num_threads {
@@ -163,6 +152,19 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
     }
 
     None
+}
+
+fn spawn_hash_searcher(result_sender: mpsc::Sender<Option<HashMatch>>, params: SearchParams) {
+    thread::spawn(move || {
+        match result_sender.send(iterate_for_match(&params)) {
+            /*
+             * If an error occurs when sending, then the receiver has already received
+             * a match from another thread, so ignore the error.
+             */
+            Ok(_) => (),
+            Err(_) => ()
+        }
+    });
 }
 
 fn split_range(min: u64, max: u64, num_segments: usize) -> Vec<ops::Range<u64>> {
@@ -179,10 +181,10 @@ fn split_range(min: u64, max: u64, num_segments: usize) -> Vec<ops::Range<u64>> 
 }
 
 fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
-    let desired_prefix = params.desired_prefix;
+    let desired_prefix = &params.desired_prefix;
     let extension_length = params.extension_word_length * 8;
     let processed_message = process_commit_message(
-        params.current_message,
+        &params.current_message,
         extension_length
     );
 
