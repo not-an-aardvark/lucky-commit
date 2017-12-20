@@ -26,6 +26,15 @@ struct HashPrefix {
     half_byte: Option<u8>,
 }
 
+impl Clone for HashPrefix {
+    fn clone(&self) -> Self {
+        HashPrefix {
+            data: self.data.to_owned(),
+            half_byte: self.half_byte.to_owned()
+        }
+    }
+}
+
 struct SearchParams<'a> {
     current_message: &'a str,
     desired_prefix: &'a HashPrefix,
@@ -123,19 +132,16 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
 
     for thread_index in 0..num_threads {
         let thread_sender = mpsc::Sender::clone(&shared_sender);
-        let message_copy = current_message.to_owned();
-        let prefix_copy = HashPrefix {
-            data: desired_prefix.data.to_owned(),
-            half_byte: desired_prefix.half_byte.to_owned()
-        };
+        let thread_message_copy = current_message.to_owned();
+        let thread_prefix_copy = desired_prefix.clone();
         thread::spawn(move || {
-            let params = SearchParams {
-                current_message: &message_copy,
-                desired_prefix: &prefix_copy,
+            let thread_params = SearchParams {
+                current_message: &thread_message_copy,
+                desired_prefix: &thread_prefix_copy,
                 counter_range: get_u64_range_segment(num_threads, thread_index),
                 extension_word_length: 8
             };
-            match thread_sender.send(iterate_for_match(&params)) {
+            match thread_sender.send(iterate_for_match(&thread_params)) {
                 /*
                  * If an error occurs when sending, then the receiver has already received
                  * a match from another thread, so ignore the error.
