@@ -130,6 +130,7 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
 fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<HashMatch> {
     let num_threads = num_cpus::get();
     let (shared_sender, receiver) = mpsc::channel();
+    let u32_ranges = split_range(0, 1u64 << 32, num_threads);
     let u64_ranges = split_range(0, u64::MAX, num_threads);
 
     for thread_index in 0..num_threads {
@@ -138,16 +139,28 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
             SearchParams {
                 current_message: current_message.to_owned(),
                 desired_prefix: desired_prefix.clone(),
-                counter_range: u64_ranges[thread_index].clone(),
-                extension_word_length: 8
+                counter_range: u32_ranges[thread_index].clone(),
+                extension_word_length: 4
             }
         );
     }
 
-    for _ in 0..num_threads {
+    for thread_index in 0..num_threads * 2 {
         let result = receiver.recv().unwrap();
         if result.is_some() {
             return result;
+        }
+
+        if thread_index < num_threads {
+            spawn_hash_searcher(
+                mpsc::Sender::clone(&shared_sender),
+                SearchParams {
+                    current_message: current_message.to_owned(),
+                    desired_prefix: desired_prefix.clone(),
+                    counter_range: u64_ranges[thread_index].clone(),
+                    extension_word_length: 8
+                }
+            );
         }
     }
 
