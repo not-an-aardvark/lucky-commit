@@ -324,3 +324,109 @@ fn git_reset_to_hash(hash: &[u8; SHA1_BYTE_LENGTH]) {
 fn to_hex_string(hash: &[u8]) -> String {
     hash.iter().map(|byte| format!("{:02x}", *byte)).collect::<String>()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_desired_prefix_empty() {
+        assert!(
+            matches_desired_prefix(
+                &[0; SHA1_BYTE_LENGTH],
+                &HashPrefix {
+                    data: Vec::new(),
+                    half_byte: None
+                }
+            )
+        )
+    }
+
+    #[test]
+    fn matches_desired_prefix_single_half() {
+        assert!(
+            matches_desired_prefix(
+                &[0x1e; SHA1_BYTE_LENGTH],
+                &HashPrefix {
+                    data: Vec::new(),
+                    half_byte: Some(0x10)
+                }
+            )
+        )
+    }
+
+    #[test]
+    fn matches_desired_prefix_single_half_mismatch() {
+        assert!(
+            !matches_desired_prefix(
+                &[0x21; SHA1_BYTE_LENGTH],
+                &HashPrefix {
+                    data: Vec::new(),
+                    half_byte: Some(0x10)
+                }
+            )
+        )
+    }
+
+    #[test]
+    fn matches_desired_prefix_data_without_half() {
+        assert!(
+            matches_desired_prefix(
+                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+                &HashPrefix {
+                    data: vec![1, 2, 3],
+                    half_byte: None
+                }
+            )
+        )
+    }
+
+    #[test]
+    fn matches_desired_prefix_matching_data_and_half() {
+        assert!(
+            matches_desired_prefix(
+                &[1, 2, 3, 0x4f, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+                &HashPrefix {
+                    data: vec![1, 2, 3],
+                    half_byte: Some(0x40)
+                }
+            )
+        )
+    }
+
+    #[test]
+    fn matches_desired_prefix_matching_data_mismatching_half() {
+        assert!(
+            !matches_desired_prefix(
+                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+                &HashPrefix {
+                    data: vec![1, 2, 3],
+                    half_byte: Some(0x50)
+                }
+            )
+        )
+    }
+
+    #[test]
+    fn matches_desired_prefix_mismatching_data_matching_half() {
+        assert!(
+            !matches_desired_prefix(
+                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+                &HashPrefix {
+                    data: vec![1, 5, 3],
+                    half_byte: Some(0x40)
+                }
+            )
+        )
+    }
+
+    #[test]
+    fn to_hex_string_basic() {
+        assert_eq!("00", to_hex_string(&[0]));
+    }
+
+    #[test]
+    fn to_hex_string_multichar() {
+        assert_eq!("00ff14", to_hex_string(&[0, 255, 20]));
+    }
+}
