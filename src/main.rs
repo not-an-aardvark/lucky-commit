@@ -4,6 +4,9 @@ extern crate num_cpus;
 
 mod padding;
 
+use crypto::digest::Digest;
+use crypto::sha1;
+
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
@@ -17,8 +20,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::u64;
 use std::u8;
-use crypto::digest::Digest;
-use crypto::sha1;
 
 const SHA1_BYTE_LENGTH: usize = 20;
 
