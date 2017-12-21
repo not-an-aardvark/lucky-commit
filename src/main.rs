@@ -128,7 +128,7 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
 }
 
 fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<HashMatch> {
-    let num_threads = num_cpus::get();
+    let num_threads = num_cpus::get_physical();
     let (shared_sender, receiver) = mpsc::channel();
     let u32_ranges = split_range(0, 1u64 << 32, num_threads);
     let u64_ranges = split_range(0, u64::MAX, num_threads);
