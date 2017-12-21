@@ -23,6 +23,8 @@ use std::u8;
 
 const SHA1_BYTE_LENGTH: usize = 20;
 
+#[derive(Debug)]
+#[derive(PartialEq)]
 struct HashPrefix {
     data: Vec<u8>,
     half_byte: Option<u8>,
@@ -328,6 +330,56 @@ fn to_hex_string(hash: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_prefix_empty() {
+        assert_eq!(
+            Some(HashPrefix { data: Vec::new(), half_byte: None }),
+            parse_prefix("")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_single_char() {
+        assert_eq!(
+            Some(HashPrefix { data: Vec::new(), half_byte: Some(0xa0) }),
+            parse_prefix("a")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_even_chars() {
+        assert_eq!(
+            Some(HashPrefix { data: vec![0xab, 0xcd, 0xef], half_byte: None }),
+            parse_prefix("abcdef")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_odd_chars() {
+        assert_eq!(
+            Some(HashPrefix { data: vec![0xab, 0xcd, 0xef], half_byte: Some(0x50) }),
+            parse_prefix("abcdef5")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_capital_letters() {
+        assert_eq!(
+            Some(HashPrefix { data: vec![0xab, 0xcd, 0xef], half_byte: Some(0xb0) }),
+            parse_prefix("ABCDEFB")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_invalid_even_chars() {
+        assert_eq!(None, parse_prefix("abcdgeb"))
+    }
+
+    #[test]
+    fn parse_prefix_invalid_odd_char() {
+        assert_eq!(None, parse_prefix("abcdefg"))
+    }
 
     #[test]
     fn matches_desired_prefix_empty() {
