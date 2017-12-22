@@ -51,6 +51,8 @@ struct HashMatch {
     hash: [u8; SHA1_BYTE_LENGTH],
 }
 
+#[derive(Debug)]
+#[derive(PartialEq)]
 struct ProcessedCommitMessage {
     full_message: Vec<u8>,
     whitespace_index: usize,
@@ -329,7 +331,41 @@ fn to_hex_string(hash: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::iter;
+
     use super::*;
+
+    const TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE: &str = "\
+        tree 0123456701234567012345670123456701234567\n\
+        parent 7654321076543210765432107654321076543210\n\
+        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+        \n\
+        Do a thing\n\
+        \n\
+        Makes some changes to the foo feature\n\
+    ";
+
+    const TEST_COMMIT_MESSAGE_WITH_SIGNATURE: &str = "\
+        tree 0123456701234567012345670123456701234567\n\
+        parent 7654321076543210765432107654321076543210\n\
+        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+        gpgsig -----BEGIN PGP SIGNATURE-----\n\
+        \n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        =AAAA\n\
+        -----END PGP SIGNATURE-----\n\
+        \n\
+        Do a thing\n\
+        \n\
+        Makes some changes to the foo feature\n\
+    ";
 
     #[test]
     fn parse_prefix_empty() {
@@ -379,6 +415,67 @@ mod tests {
     #[test]
     fn parse_prefix_invalid_odd_char() {
         assert_eq!(None, parse_prefix("abcdefg"))
+    }
+
+    #[test]
+    fn process_commit_message_without_gpg_signature() {
+        assert_eq!(
+            ProcessedCommitMessage {
+                full_message: format!(
+                    "\
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\
+                        {}\n\
+                    ",
+                    TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE.len() + 32,
+                    iter::repeat(" ").take(32).collect::<String>()
+                ).into_bytes(),
+                whitespace_index: 258
+            },
+            process_commit_message(TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE, 32)
+        )
+    }
+
+    #[test]
+    fn process_commit_message_with_gpg_signature() {
+        assert_eq!(
+            ProcessedCommitMessage {
+                full_message: format!(
+                    "\
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                        \n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        =AAAA\n\
+                        -----END PGP SIGNATURE-----\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\n\
+                    ",
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 64,
+                    iter::repeat(" ").take(64).collect::<String>()
+                ).into_bytes(),
+                whitespace_index: 215
+            },
+            process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE, 64)
+        );
     }
 
     #[test]
