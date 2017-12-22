@@ -382,6 +382,46 @@ mod tests {
     }
 
     #[test]
+    fn split_range_u32_one_segment() {
+        assert_eq!(vec![0..1u64 << 32], split_range(0, 1u64 << 32, 1));
+    }
+
+    #[test]
+    fn split_range_u32_multiple_segments() {
+        let range_max = 1u64 << 32;
+        assert_eq!(
+            vec![
+                0..range_max / 5,
+                range_max / 5..2 * range_max / 5,
+                2 * range_max / 5..3 * range_max / 5,
+                3 * range_max / 5..4 * range_max / 5,
+                4 * range_max / 5..range_max - 1
+            ],
+            split_range(0, range_max, 5)
+        );
+    }
+
+    #[test]
+    fn split_range_u64_one_segment() {
+        assert_eq!(vec![0..u64::MAX], split_range(0, u64::MAX, 1));
+    }
+
+    #[test]
+    fn split_range_u64_multiple_segments() {
+        let range_max = u64::MAX;
+        assert_eq!(
+            vec![
+                0..range_max / 5,
+                range_max / 5..range_max / 5 * 2,
+                range_max / 5 * 2..range_max / 5 * 3,
+                range_max / 5 * 3..range_max / 5 * 4,
+                range_max / 5 * 4..range_max
+            ],
+            split_range(0, range_max, 5)
+        );
+    }
+
+    #[test]
     fn matches_desired_prefix_empty() {
         assert!(
             matches_desired_prefix(
