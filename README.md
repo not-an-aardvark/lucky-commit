@@ -57,7 +57,7 @@ To install an older version, see the instructions in the `README.md` file on the
 * Long hash prefixes require more hash computations. The default hash prefix of `0000000` has length 7, so an average of 16<sup>7</sup> hashes are needed.
 * Large git commit objects increase the amount of data that needs to be hashed on each iteration.
     * A git commit object with a short commit message is typically about 250 bytes.
-    * Adding a GPG signature to a commit increases the size by about 850 bytes.
+    * Adding a GPG signature to a commit increases the size by about 350-850 bytes, depending on the PGP key size.<sup>2</sup>
 
 * Machines with more CPUs can compute more hashes. Hash searching is very parallelizable, so performance scales linearly with the number of physical CPUs. ([Hyper-threading](https://en.wikipedia.org/wiki/Hyper-threading) does not improve `lucky-commit`'s performance.)
 
@@ -68,3 +68,5 @@ This means that on a 2015 MacBook Pro with 2 physical cores, searching for a `00
 ```
 
 <sup>1</sup> The performance is roughly linear in the total amount of data to hash, but it's affected by a variety of factors. (For example, there is a per-hash overhead which disproportionately affects small input sizes, and very large input sizes can cause L1 cache misses.) I found that the throughput for 250-byte inputs was 1.52 MH/s (equivalent to 380 MB/s), and the throughput for 1100-byte inputs was 451 kH/s (equivalent to 500 MB/s).
+
+<sup>2</sup> More precisely, a signature increases the commit size by roughly `175 bytes + 4/3 * PGP key size`. For example, a signature with a 2048-bit public key increases the commit size by about `175 bytes + 4/3 * 2048 bits = 516 bytes`. This is because an RSA signature has the same length as its public key, and signature packets for git commits are encoded in base64. The OpenPGP protocol adds some additional overhead with a signature packet header and `-----{BEGIN|END} PGP SIGNATURE-----` markers.
