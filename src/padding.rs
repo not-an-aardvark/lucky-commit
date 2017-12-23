@@ -1,5 +1,5 @@
-pub const SPACE: u8 = 32;
-pub const TAB: u8 = 9;
+pub const SPACE: u8 = b' ';
+pub const TAB: u8 = b'\t';
 
 /*
  * The 256 unique strings of length 8 which contain only ' ' and '\t'.
