@@ -46,6 +46,8 @@ struct SearchParams {
     extension_word_length: usize
 }
 
+#[derive(Debug)]
+#[derive(PartialEq)]
 struct HashMatch {
     data: Vec<u8>,
     hash: [u8; SHA1_BYTE_LENGTH],
@@ -415,6 +417,68 @@ mod tests {
     #[test]
     fn parse_prefix_invalid_odd_char() {
         assert_eq!(None, parse_prefix("abcdefg"))
+    }
+
+    #[test]
+    fn iterate_for_match_failure() {
+        let search_params = SearchParams {
+            current_message: TEST_COMMIT_MESSAGE_WITH_SIGNATURE.to_owned(),
+            desired_prefix: HashPrefix {
+                data: vec![1, 2, 3],
+                half_byte: Some(0x40)
+            },
+            counter_range: 1..100,
+            extension_word_length: 4
+        };
+
+        assert_eq!(None, iterate_for_match(&search_params))
+    }
+
+    #[test]
+    fn search_for_match_success() {
+        let search_params = SearchParams {
+            current_message: TEST_COMMIT_MESSAGE_WITH_SIGNATURE.to_owned(),
+            desired_prefix: HashPrefix {
+                data: vec![30, 20, 97],
+                half_byte: Some(0x70)
+            },
+            counter_range: 1..100,
+            extension_word_length: 4
+        };
+
+        assert_eq!(
+            Some(
+                HashMatch {
+                    data: format!(
+                        "\
+                            commit {}\x00\
+                            tree 0123456701234567012345670123456701234567\n\
+                            parent 7654321076543210765432107654321076543210\n\
+                            author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                            committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                            gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                            \n\
+                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                            =AAAA\n\
+                            -----END PGP SIGNATURE-----\n\
+                            \n\
+                            Do a thing\n\
+                            \n\
+                            Makes some changes to the foo feature\n\
+                        ",
+                        TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
+                        " \t\t                             "
+                    ).into_bytes(),
+                    hash: [30, 20, 97, 126, 158, 173, 223, 88, 10, 98, 54, 30, 75, 47, 3, 233, 69, 172, 76, 203]
+                }
+            ),
+            iterate_for_match(&search_params)
+        )
     }
 
     #[test]
