@@ -240,10 +240,16 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
 }
 
 fn process_commit_message(original_message: &str, extension_length: usize) -> ProcessedCommitMessage {
-    let mut message_object: Vec<u8> = format!("commit {}\x00", original_message.len() + extension_length)
+    let commit_split_index = get_commit_message_split_index(original_message);
+    let trimmable_paddings: &[_] = &[' ', '\t'];
+    let trimmed_right_half = original_message[commit_split_index..].trim_left_matches(trimmable_paddings);
+
+    let mut message_object: Vec<u8> = format!(
+        "commit {}\x00",
+        original_message[..commit_split_index].len() + extension_length + trimmed_right_half.len()
+    )
         .into_bytes();
 
-    let commit_split_index = get_commit_message_split_index(original_message);
     let whitespace_index = commit_split_index + message_object.len();
 
     for character in original_message[..commit_split_index].as_bytes() {
@@ -254,7 +260,7 @@ fn process_commit_message(original_message: &str, extension_length: usize) -> Pr
         message_object.push(padding::SPACE);
     }
 
-    for character in original_message[commit_split_index..].as_bytes() {
+    for character in trimmed_right_half.as_bytes() {
         message_object.push(*character);
     }
 
@@ -279,7 +285,7 @@ fn get_commit_message_split_index(message: &str) -> usize {
             if message[index..].starts_with(SIGNATURE_MARKER) {
                 return index + SIGNATURE_MARKER.len();
             } else {
-                return message.len() - 1;
+                return message.trim_right().len()
             }
         }
         if character == '\n' {
@@ -287,7 +293,7 @@ fn get_commit_message_split_index(message: &str) -> usize {
         }
     }
 
-    message.len() - 1
+    message.trim_right().len()
 }
 
 fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) -> bool {
@@ -540,6 +546,66 @@ mod tests {
             },
             process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE, 64)
         );
+    }
+
+    #[test]
+    fn process_commit_message_already_padded() {
+        assert_eq!(
+            ProcessedCommitMessage {
+                full_message: format!(
+                    "\
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                        \n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        =AAAA\n\
+                        -----END PGP SIGNATURE-----\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\n\
+                    ",
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
+                    iter::repeat(" ").take(32).collect::<String>()
+                ).into_bytes(),
+                whitespace_index: 215
+            },
+            process_commit_message(
+                &format!(
+                    "\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                        \n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        =AAAA\n\
+                        -----END PGP SIGNATURE-----\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\n\
+                    ",
+                    iter::repeat(" ").take(64).collect::<String>()
+                ),
+                32
+            )
+        )
     }
 
     #[test]
