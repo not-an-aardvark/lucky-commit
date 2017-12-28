@@ -142,7 +142,7 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
 
     for thread_index in 0..num_threads {
         spawn_hash_searcher(
-            mpsc::Sender::clone(&shared_sender),
+            shared_sender.clone(),
             SearchParams {
                 current_message: current_message.to_owned(),
                 desired_prefix: desired_prefix.clone(),
@@ -160,7 +160,7 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
 
         if thread_index < num_threads {
             spawn_hash_searcher(
-                mpsc::Sender::clone(&shared_sender),
+                shared_sender.clone(),
                 SearchParams {
                     current_message: current_message.to_owned(),
                     desired_prefix: desired_prefix.clone(),
