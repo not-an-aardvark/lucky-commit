@@ -44,7 +44,7 @@ The latest version is written in **Rust**. To install it:
     $ cargo build --release
     ```
 
-    This will create the `lucky_commit` binary in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
+    This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
 
 To install an older version, see the instructions in the `README.md` file on the corresponding branch:
 
