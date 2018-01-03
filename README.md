@@ -4,7 +4,7 @@ Make your git commits lucky!
 
 ## What?
 
-With this simple command, you can change the start of your git commit hashes to whatever you want.
+With this simple tool, you can change the start of your git commit hashes to whatever you want.
 
 ```bash
 $ git log
@@ -18,7 +18,7 @@ As a demonstration, see the latest commit in this repository.
 
 ## How?
 
-lucky-commit amends your commits by adding a few characters of various types of whitespace, and keeps hashing new messages until it gets the right value. By default, it will keep searching until it finds a hash starting with "0000000", but this can be changed by simply passing the desired hash as an argument.
+`lucky-commit` amends your commits by adding a few characters of various types of whitespace, and keeps hashing new messages until it gets the right value. By default, it will keep searching until it finds a hash starting with "0000000", but this can be changed by simply passing the desired hash as an argument.
 
 ```bash
 $ lucky-commit 1010101
@@ -57,7 +57,7 @@ To install an older version, see the instructions in the `README.md` file on the
 * Long hash prefixes require more hash computations. The default hash prefix of `0000000` has length 7, so an average of 16<sup>7</sup> hashes are needed.
 * Large git commit objects increase the amount of data that needs to be hashed on each iteration.
     * A git commit object with a short commit message is typically about 250 bytes.
-    * Adding a GPG signature to a commit increases the size by about 350-850 bytes, depending on the PGP key size.<sup>2</sup>
+    * Adding a GPG signature to a commit increases the size by about 350-850 bytes, depending on the public key size.<sup>2</sup>
 
 * Machines with more CPUs can compute more hashes. Hash searching is very parallelizable, so performance scales linearly with the number of physical CPUs. ([Hyper-threading](https://en.wikipedia.org/wiki/Hyper-threading) does not improve `lucky-commit`'s performance.)
 
@@ -66,6 +66,8 @@ This means that on a 2015 MacBook Pro with 2 physical cores, searching for a `00
 ```
 (16^7 hashes) * (250 bytes/hash) / (380 MB/s/core) / (2 cores) = 88 seconds
 ```
+
+---
 
 <sup>1</sup> The performance is roughly linear in the total amount of data to hash, but it's affected by a variety of factors. (For example, there is a per-hash overhead which disproportionately affects small input sizes, and very large input sizes can cause L1 cache misses.) I found that the throughput for 250-byte inputs was 1.52 MH/s (equivalent to 380 MB/s), and the throughput for 1100-byte inputs was 451 kH/s (equivalent to 500 MB/s).
 
