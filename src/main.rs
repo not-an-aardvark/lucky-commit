@@ -12,6 +12,7 @@ use flate2::write::ZlibEncoder;
 
 use std::env;
 use std::fs;
+use std::io;
 use std::io::Write;
 use std::ops;
 use std::process;
@@ -73,13 +74,13 @@ fn main() {
     }
 }
 
-fn print_usage_and_exit() {
-    fail_with_message("Usage: lucky-commit [commit-hash-prefix]");
+fn print_usage_and_exit() -> ! {
+    fail_with_message("Usage: lucky-commit [commit-hash-prefix]")
 }
 
-fn fail_with_message(message: &str) {
+fn fail_with_message(message: &str) -> ! {
     eprintln!("{}", message);
-    process::exit(1);
+    process::exit(1)
 }
 
 fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
@@ -113,7 +114,8 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
 
     match find_match(current_message, desired_prefix) {
         Some(hash_match) => {
-            create_git_object_file(&hash_match);
+            create_git_object_file(&hash_match)
+                .expect("Failed to create git object file");
             git_reset_to_hash(&hash_match.hash);
         },
         None => fail_with_message("Failed to find a match")
@@ -303,8 +305,8 @@ fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) ->
     }
 }
 
-fn create_git_object_file(search_result: &HashMatch) {
-    let compressed_object = zlib_compress(&search_result.data);
+fn create_git_object_file(search_result: &HashMatch) -> io::Result<()> {
+    let compressed_object = zlib_compress(&search_result.data)?;
     let dir_path = format!(".git/objects/{:02x}", search_result.hash[0]);
     let file_path = format!(
         "{}/{}",
@@ -314,19 +316,16 @@ fn create_git_object_file(search_result: &HashMatch) {
 
     fs::DirBuilder::new()
         .recursive(true)
-        .create(dir_path)
-        .expect("Failed to create git object directory");
+        .create(dir_path)?;
 
-    fs::File::create(file_path)
-        .expect("Failed to open git object file")
+    fs::File::create(file_path)?
         .write_all(&compressed_object)
-        .expect("Failed to write git object file");
 }
 
-fn zlib_compress(data: &[u8]) -> Vec<u8> {
+fn zlib_compress(data: &[u8]) -> io::Result<Vec<u8>> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write(data).expect("zlib compression failed");
-    encoder.finish().expect("zlib compression failed")
+    encoder.write(data)?;
+    encoder.finish()
 }
 
 fn git_reset_to_hash(hash: &[u8; SHA1_BYTE_LENGTH]) {
