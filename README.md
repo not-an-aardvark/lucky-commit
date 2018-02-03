@@ -37,14 +37,19 @@ I've rewritten the `lucky-commit` project several times as a method to learn new
 The latest version is written in **Rust**. To install it:
 
 * Make sure you have `rustc` and `cargo` installed. Installation instructions can be found [here](https://doc.rust-lang.org/book/second-edition/ch01-01-installation.html#installation).
+* Run `cargo install lucky_commit`
 
-    ```
-    $ git clone https://github.com/not-an-aardvark/lucky-commit
-    $ cd lucky-commit/
-    $ cargo build --release
-    ```
+Depending on your `cargo` setup, this will usually add the binary to your `$PATH`. You can then use it by running `lucky_commit`.
 
-    This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
+Alternatively, you can build from source:
+
+```
+$ git clone https://github.com/not-an-aardvark/lucky-commit
+$ cd lucky-commit/
+$ cargo build --release
+```
+
+This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
 
 To install an older version, see the instructions in the `README.md` file on the corresponding branch:
 
