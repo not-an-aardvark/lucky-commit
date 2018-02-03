@@ -1,7 +1,10 @@
 [package]
 name = "lucky_commit"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Teddy Katz <teddy.katz@gmail.com>"]
+description = "Make your git commits lucky!"
+repository = "https://github.com/not-an-aardvark/lucky-commit"
+license = "MIT"
 
 [dependencies]
 
