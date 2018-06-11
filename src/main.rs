@@ -307,7 +307,22 @@ fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) ->
 
 fn create_git_object_file(search_result: &HashMatch) -> io::Result<()> {
     let compressed_object = zlib_compress(&search_result.data)?;
-    let dir_path = format!(".git/objects/{:02x}", search_result.hash[0]);
+
+    let md = std::fs::metadata(".git").unwrap();
+    let contents;
+    let mut dir = ".git";
+
+    if md.is_file() {
+        contents = fs::read_to_string(".git")?;
+
+        if contents.starts_with(&"gitdir: ") {
+            dir = &contents[8..];
+        } else {
+            fail_with_message(".git must be a directory or submodule");
+        }
+    }
+
+    let dir_path = format!("{}/objects/{:02x}", dir, search_result.hash[0]);
     let file_path = format!(
         "{}/{}",
         dir_path,
