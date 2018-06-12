@@ -308,8 +308,9 @@ fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) ->
 fn create_git_object_file(search_result: &HashMatch) -> io::Result<()> {
     let compressed_object = zlib_compress(&search_result.data)?;
     let git_dir_bytes = run_command("git", &["rev-parse", "--git-dir"]);
-    let mut git_dir = &String::from_utf8(git_dir_bytes).expect("git rev-parse --git-dir returned invalid utf8");
-    git_dir.truncate(git_dir.len() - 1);
+    let mut git_dir = String::from_utf8(git_dir_bytes).expect("git rev-parse --git-dir returned invalid utf8");
+    let len = git_dir.len();
+    git_dir.truncate(len - 1);
     let dir_path = format!("{}/objects/{:02x}", git_dir, search_result.hash[0]);
     let file_path = format!(
         "{}/{}",
