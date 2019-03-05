@@ -274,20 +274,18 @@ fn process_commit_message(original_message: &str, extension_length: usize) -> Pr
 
 fn get_commit_message_split_index(message: &str) -> usize {
     /*
-     * If the commit has a GPG signature (detected by the presence of "gpgsig " at the start
-     * of the fifth line), then add the padding whitespace immediately after the text "gpgsig ".
+     * If the commit has a GPG signature (detected by the presence of "-----BEGIN PGP SIGNATURE-----" on
+     * the fifth line), then add the padding whitespace immediately after the text "-----BEGIN PGP SIGNATURE-----".
      * Otherwise, add the padding whitespace right before the end of the commit message.
      *
      * If a signature is present, modifying the commit message would make the signature invalid.
      */
     let mut current_line_index = 0;
-    const SIGNATURE_MARKER: &str = "gpgsig ";
+    const SIGNATURE_MARKER: &str = "-----BEGIN PGP SIGNATURE-----";
     for (index, character) in message.char_indices() {
         if current_line_index == 4 {
             if message[index..].starts_with(SIGNATURE_MARKER) {
                 return index + SIGNATURE_MARKER.len();
-            } else {
-                return message.trim_right().len()
             }
         }
         if character == '\n' {
@@ -448,8 +446,8 @@ mod tests {
         let search_params = SearchParams {
             current_message: TEST_COMMIT_MESSAGE_WITH_SIGNATURE.to_owned(),
             desired_prefix: HashPrefix {
-                data: vec![252, 229, 239],
-                half_byte: Some(0xb0)
+                data: vec![60, 14, 227],
+                half_byte: Some(0xa0)
             },
             counter_range: 1..100,
             extension_word_length: 4
@@ -465,7 +463,7 @@ mod tests {
                             parent 7654321076543210765432107654321076543210\n\
                             author Foo Bár <foo@example.com> 1513980859 -0500\n\
                             committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                            gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                            gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
                             \n\
                             AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                             AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -481,9 +479,9 @@ mod tests {
                             Makes some changes to the foo feature\n\
                         ",
                         TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
-                        "  \t  \t\t\t                        "
+                        "  \t\t\t\t\t                         "
                     ).into_bytes(),
-                    hash: [252, 229, 239, 189, 103, 10, 27, 3, 228, 101, 237, 162, 159, 20, 220, 34, 192, 177, 79, 90]
+                    hash: [60, 14, 227, 164, 209, 218, 169, 30, 57, 111, 16, 239, 90, 26, 77, 144, 229, 220, 205, 46]
                 }
             ),
             iterate_for_match(&search_params)
@@ -527,7 +525,7 @@ mod tests {
                         parent 7654321076543210765432107654321076543210\n\
                         author Foo Bár <foo@example.com> 1513980859 -0500\n\
                         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                        gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                        gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
                         \n\
                         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -545,7 +543,7 @@ mod tests {
                     TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 64,
                     iter::repeat(" ").take(64).collect::<String>()
                 ).into_bytes(),
-                whitespace_index: 216
+                whitespace_index: 245
             },
             process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE, 64)
         );
@@ -562,7 +560,7 @@ mod tests {
                         parent 7654321076543210765432107654321076543210\n\
                         author Foo Bár <foo@example.com> 1513980859 -0500\n\
                         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                        gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                        gpgsig {}-----BEGIN PGP SIGNATURE-----{}\n\
                         \n\
                         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -577,10 +575,11 @@ mod tests {
                         \n\
                         Makes some changes to the foo feature\n\
                     ",
-                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 64,
+                    iter::repeat("\t").take(32).collect::<String>(),
                     iter::repeat(" ").take(32).collect::<String>()
                 ).into_bytes(),
-                whitespace_index: 216
+                whitespace_index: 277
             },
             process_commit_message(
                 &format!(
@@ -589,7 +588,7 @@ mod tests {
                         parent 7654321076543210765432107654321076543210\n\
                         author Foo Bár <foo@example.com> 1513980859 -0500\n\
                         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                        gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                        gpgsig {}-----BEGIN PGP SIGNATURE-----{}\n\
                         \n\
                         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -604,7 +603,8 @@ mod tests {
                         \n\
                         Makes some changes to the foo feature\n\
                     ",
-                    iter::repeat(" ").take(64).collect::<String>()
+                    iter::repeat("\t").take(32).collect::<String>(),
+                    iter::repeat("\t").take(64).collect::<String>()
                 ),
                 32
             )
