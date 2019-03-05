@@ -274,24 +274,33 @@ fn process_commit_message(original_message: &str, extension_length: usize) -> Pr
 
 fn get_commit_message_split_index(message: &str) -> usize {
     /*
-     * If the commit has a GPG signature (detected by the presence of "gpgsig " at the start
-     * of the fifth line), then add the padding whitespace immediately after the text "gpgsig ".
-     * Otherwise, add the padding whitespace right before the end of the commit message.
+     * If the commit has a GPG signature (detected by the presence of the
+     * signature marker at the start of the fifth line), then add the padding
+     * whitespace immediately after it.  Otherwise, add the padding whitespace
+     * right before the end of the commit message.
      *
-     * If a signature is present, modifying the commit message would make the signature invalid.
+     * If a signature is present, modifying the commit message would make the
+     * signature invalid.
      */
-    let mut current_line_index = 0;
-    const SIGNATURE_MARKER: &str = "gpgsig ";
-    for (index, character) in message.chars().enumerate() {
-        if current_line_index == 4 {
-            if message[index..].starts_with(SIGNATURE_MARKER) {
-                return index + SIGNATURE_MARKER.len();
-            } else {
-                return message.trim_right().len()
+    const SIGNATURE_MARKER: &str = "gpgsig -----BEGIN PGP SIGNATURE-----";
+    let mut temp_msg = message;
+
+    for x in 0..4 {
+        let index = temp_msg.find('\n');
+        match index {
+            None      => return message.trim_right().len(),
+            Some(idx) => {
+                temp_msg = &temp_msg[(idx + 1)..];
+                if x == 3 {
+                    if temp_msg.starts_with(SIGNATURE_MARKER) {
+                        let index = message.find(temp_msg);
+                        match index {
+                            None    => fail_with_message("cannot find `gpgsig` entry"),
+                            Some(i) => return i + SIGNATURE_MARKER.len(),
+                        }
+                    }
+                }
             }
-        }
-        if character == '\n' {
-            current_line_index += 1;
         }
     }
 
