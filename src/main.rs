@@ -282,7 +282,7 @@ fn get_commit_message_split_index(message: &str) -> usize {
      */
     let mut current_line_index = 0;
     const SIGNATURE_MARKER: &str = "gpgsig ";
-    for (index, character) in message.chars().enumerate() {
+    for (index, character) in message.char_indices() {
         if current_line_index == 4 {
             if message[index..].starts_with(SIGNATURE_MARKER) {
                 return index + SIGNATURE_MARKER.len();
@@ -349,7 +349,7 @@ mod tests {
     const TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE: &str = "\
         tree 0123456701234567012345670123456701234567\n\
         parent 7654321076543210765432107654321076543210\n\
-        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+        author Foo Bár <foo@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         \n\
         Do a thing\n\
@@ -360,7 +360,7 @@ mod tests {
     const TEST_COMMIT_MESSAGE_WITH_SIGNATURE: &str = "\
         tree 0123456701234567012345670123456701234567\n\
         parent 7654321076543210765432107654321076543210\n\
-        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+        author Foo Bár <foo@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         gpgsig -----BEGIN PGP SIGNATURE-----\n\
         \n\
@@ -448,8 +448,8 @@ mod tests {
         let search_params = SearchParams {
             current_message: TEST_COMMIT_MESSAGE_WITH_SIGNATURE.to_owned(),
             desired_prefix: HashPrefix {
-                data: vec![30, 20, 97],
-                half_byte: Some(0x70)
+                data: vec![252, 229, 239],
+                half_byte: Some(0xb0)
             },
             counter_range: 1..100,
             extension_word_length: 4
@@ -463,7 +463,7 @@ mod tests {
                             commit {}\x00\
                             tree 0123456701234567012345670123456701234567\n\
                             parent 7654321076543210765432107654321076543210\n\
-                            author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                            author Foo Bár <foo@example.com> 1513980859 -0500\n\
                             committer Baz Qux <baz@example.com> 1513980898 -0500\n\
                             gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
                             \n\
@@ -481,9 +481,9 @@ mod tests {
                             Makes some changes to the foo feature\n\
                         ",
                         TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
-                        " \t\t                             "
+                        "  \t  \t\t\t                        "
                     ).into_bytes(),
-                    hash: [30, 20, 97, 126, 158, 173, 223, 88, 10, 98, 54, 30, 75, 47, 3, 233, 69, 172, 76, 203]
+                    hash: [252, 229, 239, 189, 103, 10, 27, 3, 228, 101, 237, 162, 159, 20, 220, 34, 192, 177, 79, 90]
                 }
             ),
             iterate_for_match(&search_params)
@@ -499,7 +499,7 @@ mod tests {
                         commit {}\x00\
                         tree 0123456701234567012345670123456701234567\n\
                         parent 7654321076543210765432107654321076543210\n\
-                        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
                         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
                         \n\
                         Do a thing\n\
@@ -510,7 +510,7 @@ mod tests {
                     TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE.len() + 32,
                     iter::repeat(" ").take(32).collect::<String>()
                 ).into_bytes(),
-                whitespace_index: 258
+                whitespace_index: 259
             },
             process_commit_message(TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE, 32)
         )
@@ -525,7 +525,7 @@ mod tests {
                         commit {}\x00\
                         tree 0123456701234567012345670123456701234567\n\
                         parent 7654321076543210765432107654321076543210\n\
-                        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
                         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
                         gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
                         \n\
@@ -545,7 +545,7 @@ mod tests {
                     TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 64,
                     iter::repeat(" ").take(64).collect::<String>()
                 ).into_bytes(),
-                whitespace_index: 215
+                whitespace_index: 216
             },
             process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE, 64)
         );
@@ -560,7 +560,7 @@ mod tests {
                         commit {}\x00\
                         tree 0123456701234567012345670123456701234567\n\
                         parent 7654321076543210765432107654321076543210\n\
-                        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
                         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
                         gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
                         \n\
@@ -580,14 +580,14 @@ mod tests {
                     TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
                     iter::repeat(" ").take(32).collect::<String>()
                 ).into_bytes(),
-                whitespace_index: 215
+                whitespace_index: 216
             },
             process_commit_message(
                 &format!(
                     "\
                         tree 0123456701234567012345670123456701234567\n\
                         parent 7654321076543210765432107654321076543210\n\
-                        author Foo Bar <foo@example.com> 1513980859 -0500\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
                         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
                         gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
                         \n\
