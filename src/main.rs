@@ -244,11 +244,11 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
 fn process_commit_message(original_message: &str, extension_length: usize) -> ProcessedCommitMessage {
     let commit_split_index = get_commit_message_split_index(original_message);
     let trimmable_paddings: &[_] = &[' ', '\t'];
-    let trimmed_right_half = original_message[commit_split_index..].trim_left_matches(trimmable_paddings);
+    let trimmed_end_half = original_message[commit_split_index..].trim_start_matches(trimmable_paddings);
 
     let mut message_object: Vec<u8> = format!(
         "commit {}\x00",
-        original_message[..commit_split_index].len() + extension_length + trimmed_right_half.len()
+        original_message[..commit_split_index].len() + extension_length + trimmed_end_half.len()
     )
         .into_bytes();
 
@@ -262,7 +262,7 @@ fn process_commit_message(original_message: &str, extension_length: usize) -> Pr
         message_object.push(padding::SPACE);
     }
 
-    for character in trimmed_right_half.as_bytes() {
+    for character in trimmed_end_half.as_bytes() {
         message_object.push(*character);
     }
 
@@ -293,7 +293,7 @@ fn get_commit_message_split_index(message: &str) -> usize {
         }
     }
 
-    message.trim_right().len()
+    message.trim_end().len()
 }
 
 fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) -> bool {
