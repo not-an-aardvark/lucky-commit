@@ -7,8 +7,8 @@ mod padding;
 use crypto::digest::Digest;
 use crypto::sha1;
 
-use flate2::Compression;
 use flate2::write::ZlibEncoder;
+use flate2::Compression;
 
 use std::env;
 use std::fs;
@@ -24,8 +24,7 @@ use std::u8;
 
 const SHA1_BYTE_LENGTH: usize = 20;
 
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 struct HashPrefix {
     data: Vec<u8>,
     half_byte: Option<u8>,
@@ -35,7 +34,7 @@ impl Clone for HashPrefix {
     fn clone(&self) -> Self {
         HashPrefix {
             data: self.data.to_owned(),
-            half_byte: self.half_byte.to_owned()
+            half_byte: self.half_byte.to_owned(),
         }
     }
 }
@@ -44,18 +43,16 @@ struct SearchParams {
     current_message: String,
     desired_prefix: HashPrefix,
     counter_range: ops::Range<u64>,
-    extension_word_length: usize
+    extension_word_length: usize,
 }
 
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 struct HashMatch {
     data: Vec<u8>,
     hash: [u8; SHA1_BYTE_LENGTH],
 }
 
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 struct ProcessedCommitMessage {
     full_message: Vec<u8>,
     whitespace_index: usize,
@@ -68,9 +65,9 @@ fn main() {
         1 => run_lucky_commit(&parse_prefix("0000000").unwrap()),
         2 => match parse_prefix(&args[1]) {
             Some(prefix) => run_lucky_commit(&prefix),
-            None => print_usage_and_exit()
+            None => print_usage_and_exit(),
         },
-        _ => print_usage_and_exit()
+        _ => print_usage_and_exit(),
     }
 }
 
@@ -88,7 +85,7 @@ fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
     for index in 0..(prefix.len() / 2) {
         match u8::from_str_radix(&prefix[2 * index..2 * index + 2], 16) {
             Ok(value) => data.push(value),
-            Err(_) => return None
+            Err(_) => return None,
         }
     }
 
@@ -97,11 +94,11 @@ fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
         half_byte: if prefix.len() % 2 == 1 {
             match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
                 Ok(value) => Some(value << 4),
-                Err(_) => return None
+                Err(_) => return None,
             }
         } else {
             None
-        }
+        },
     };
 
     Some(parsed_prefix)
@@ -109,16 +106,15 @@ fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
 
 fn run_lucky_commit(desired_prefix: &HashPrefix) {
     let current_message_bytes = run_command("git", &["cat-file", "commit", "HEAD"]);
-    let current_message = &String::from_utf8(current_message_bytes)
-        .expect("Git commit contains invalid utf8");
+    let current_message =
+        &String::from_utf8(current_message_bytes).expect("Git commit contains invalid utf8");
 
     match find_match(current_message, desired_prefix) {
         Some(hash_match) => {
-            create_git_object_file(&hash_match)
-                .expect("Failed to create git object file");
+            create_git_object_file(&hash_match).expect("Failed to create git object file");
             git_reset_to_hash(&hash_match.hash);
-        },
-        None => fail_with_message("Failed to find a match")
+        }
+        None => fail_with_message("Failed to find a match"),
     }
 }
 
@@ -149,8 +145,8 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
                 current_message: current_message.to_owned(),
                 desired_prefix: desired_prefix.clone(),
                 counter_range: u32_ranges[thread_index].clone(),
-                extension_word_length: 4
-            }
+                extension_word_length: 4,
+            },
         );
     }
 
@@ -167,8 +163,8 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
                     current_message: current_message.to_owned(),
                     desired_prefix: desired_prefix.clone(),
                     counter_range: u64_ranges[thread_index].clone(),
-                    extension_word_length: 8
-                }
+                    extension_word_length: 8,
+                },
             );
         }
     }
@@ -184,7 +180,7 @@ fn spawn_hash_searcher(result_sender: mpsc::Sender<Option<HashMatch>>, params: S
              * a match from another thread, so ignore the error.
              */
             Ok(_) => (),
-            Err(_) => ()
+            Err(_) => (),
         }
     });
 }
@@ -205,10 +201,7 @@ fn split_range(min: u64, max: u64, num_segments: usize) -> Vec<ops::Range<u64>> 
 fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     let desired_prefix = &params.desired_prefix;
     let extension_length = params.extension_word_length * 8;
-    let processed_message = process_commit_message(
-        &params.current_message,
-        extension_length
-    );
+    let processed_message = process_commit_message(&params.current_message, extension_length);
 
     let mut hash_data = processed_message.full_message;
     let whitespace_index = processed_message.whitespace_index;
@@ -221,7 +214,8 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
         while whitespace_word_index < extension_length {
             let start_index = whitespace_index + whitespace_word_index;
             let padding_index = (counter >> whitespace_word_index) as u8 as usize;
-            &mut hash_data[start_index..start_index + 8].copy_from_slice(&padding::PADDING_LIST[padding_index]);
+            &mut hash_data[start_index..start_index + 8]
+                .copy_from_slice(&padding::PADDING_LIST[padding_index]);
             whitespace_word_index += 8;
         }
 
@@ -232,7 +226,7 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
             return Some(HashMatch {
                 data: hash_data,
                 hash: hash_result,
-            })
+            });
         }
 
         sha1_hash.reset();
@@ -241,16 +235,20 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     None
 }
 
-fn process_commit_message(original_message: &str, extension_length: usize) -> ProcessedCommitMessage {
+fn process_commit_message(
+    original_message: &str,
+    extension_length: usize,
+) -> ProcessedCommitMessage {
     let commit_split_index = get_commit_message_split_index(original_message);
     let trimmable_paddings: &[_] = &[' ', '\t'];
-    let trimmed_end_half = original_message[commit_split_index..].trim_start_matches(trimmable_paddings);
+    let trimmed_end_half =
+        original_message[commit_split_index..].trim_start_matches(trimmable_paddings);
 
     let mut message_object: Vec<u8> = format!(
         "commit {}\x00",
         original_message[..commit_split_index].len() + extension_length + trimmed_end_half.len()
     )
-        .into_bytes();
+    .into_bytes();
 
     let whitespace_index = commit_split_index + message_object.len();
 
@@ -297,31 +295,26 @@ fn get_commit_message_split_index(message: &str) -> usize {
 }
 
 fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) -> bool {
-    prefix.data == &hash[..prefix.data.len()] && match prefix.half_byte {
-        Some(half_byte) => (hash[prefix.data.len()] & 0xf0) == half_byte,
-        None => true,
-    }
+    prefix.data == &hash[..prefix.data.len()]
+        && match prefix.half_byte {
+            Some(half_byte) => (hash[prefix.data.len()] & 0xf0) == half_byte,
+            None => true,
+        }
 }
 
 fn create_git_object_file(search_result: &HashMatch) -> io::Result<()> {
     let compressed_object = zlib_compress(&search_result.data)?;
     let git_dir_bytes = run_command("git", &["rev-parse", "--git-dir"]);
-    let mut git_dir = String::from_utf8(git_dir_bytes).expect("git rev-parse --git-dir returned invalid utf8");
+    let mut git_dir =
+        String::from_utf8(git_dir_bytes).expect("git rev-parse --git-dir returned invalid utf8");
     let len = git_dir.len();
     git_dir.truncate(len - 1);
     let dir_path = format!("{}/objects/{:02x}", git_dir, search_result.hash[0]);
-    let file_path = format!(
-        "{}/{}",
-        dir_path,
-        to_hex_string(&search_result.hash[1..])
-    );
+    let file_path = format!("{}/{}", dir_path, to_hex_string(&search_result.hash[1..]));
 
-    fs::DirBuilder::new()
-        .recursive(true)
-        .create(dir_path)?;
+    fs::DirBuilder::new().recursive(true).create(dir_path)?;
 
-    fs::File::create(file_path)?
-        .write_all(&compressed_object)
+    fs::File::create(file_path)?.write_all(&compressed_object)
 }
 
 fn zlib_compress(data: &[u8]) -> io::Result<Vec<u8>> {
@@ -335,7 +328,9 @@ fn git_reset_to_hash(hash: &[u8; SHA1_BYTE_LENGTH]) {
 }
 
 fn to_hex_string(hash: &[u8]) -> String {
-    hash.iter().map(|byte| format!("{:02x}", *byte)).collect::<String>()
+    hash.iter()
+        .map(|byte| format!("{:02x}", *byte))
+        .collect::<String>()
 }
 
 #[cfg(test)]
@@ -344,42 +339,47 @@ mod tests {
 
     use super::*;
 
-    const TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE: &str = "\
-        tree 0123456701234567012345670123456701234567\n\
-        parent 7654321076543210765432107654321076543210\n\
-        author Foo Bár <foo@example.com> 1513980859 -0500\n\
-        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-        \n\
-        Do a thing\n\
-        \n\
-        Makes some changes to the foo feature\n\
-    ";
+    const TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE: &str =
+        "\
+         tree 0123456701234567012345670123456701234567\n\
+         parent 7654321076543210765432107654321076543210\n\
+         author Foo Bár <foo@example.com> 1513980859 -0500\n\
+         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+         \n\
+         Do a thing\n\
+         \n\
+         Makes some changes to the foo feature\n\
+         ";
 
-    const TEST_COMMIT_MESSAGE_WITH_SIGNATURE: &str = "\
-        tree 0123456701234567012345670123456701234567\n\
-        parent 7654321076543210765432107654321076543210\n\
-        author Foo Bár <foo@example.com> 1513980859 -0500\n\
-        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-        gpgsig -----BEGIN PGP SIGNATURE-----\n\
-        \n\
-        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-        =AAAA\n\
-        -----END PGP SIGNATURE-----\n\
-        \n\
-        Do a thing\n\
-        \n\
-        Makes some changes to the foo feature\n\
-    ";
+    const TEST_COMMIT_MESSAGE_WITH_SIGNATURE: &str =
+        "\
+         tree 0123456701234567012345670123456701234567\n\
+         parent 7654321076543210765432107654321076543210\n\
+         author Foo Bár <foo@example.com> 1513980859 -0500\n\
+         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+         gpgsig -----BEGIN PGP SIGNATURE-----\n\
+         \n\
+         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+         =AAAA\n\
+         -----END PGP SIGNATURE-----\n\
+         \n\
+         Do a thing\n\
+         \n\
+         Makes some changes to the foo feature\n\
+         ";
 
     #[test]
     fn parse_prefix_empty() {
         assert_eq!(
-            Some(HashPrefix { data: Vec::new(), half_byte: None }),
+            Some(HashPrefix {
+                data: Vec::new(),
+                half_byte: None
+            }),
             parse_prefix("")
         )
     }
@@ -387,7 +387,10 @@ mod tests {
     #[test]
     fn parse_prefix_single_char() {
         assert_eq!(
-            Some(HashPrefix { data: Vec::new(), half_byte: Some(0xa0) }),
+            Some(HashPrefix {
+                data: Vec::new(),
+                half_byte: Some(0xa0)
+            }),
             parse_prefix("a")
         )
     }
@@ -395,7 +398,10 @@ mod tests {
     #[test]
     fn parse_prefix_even_chars() {
         assert_eq!(
-            Some(HashPrefix { data: vec![0xab, 0xcd, 0xef], half_byte: None }),
+            Some(HashPrefix {
+                data: vec![0xab, 0xcd, 0xef],
+                half_byte: None
+            }),
             parse_prefix("abcdef")
         )
     }
@@ -403,7 +409,10 @@ mod tests {
     #[test]
     fn parse_prefix_odd_chars() {
         assert_eq!(
-            Some(HashPrefix { data: vec![0xab, 0xcd, 0xef], half_byte: Some(0x50) }),
+            Some(HashPrefix {
+                data: vec![0xab, 0xcd, 0xef],
+                half_byte: Some(0x50)
+            }),
             parse_prefix("abcdef5")
         )
     }
@@ -411,7 +420,10 @@ mod tests {
     #[test]
     fn parse_prefix_capital_letters() {
         assert_eq!(
-            Some(HashPrefix { data: vec![0xab, 0xcd, 0xef], half_byte: Some(0xb0) }),
+            Some(HashPrefix {
+                data: vec![0xab, 0xcd, 0xef],
+                half_byte: Some(0xb0)
+            }),
             parse_prefix("ABCDEFB")
         )
     }
@@ -432,10 +444,10 @@ mod tests {
             current_message: TEST_COMMIT_MESSAGE_WITH_SIGNATURE.to_owned(),
             desired_prefix: HashPrefix {
                 data: vec![1, 2, 3],
-                half_byte: Some(0x40)
+                half_byte: Some(0x40),
             },
             counter_range: 1..100,
-            extension_word_length: 4
+            extension_word_length: 4,
         };
 
         assert_eq!(None, iterate_for_match(&search_params))
@@ -447,43 +459,45 @@ mod tests {
             current_message: TEST_COMMIT_MESSAGE_WITH_SIGNATURE.to_owned(),
             desired_prefix: HashPrefix {
                 data: vec![60, 14, 227],
-                half_byte: Some(0xa0)
+                half_byte: Some(0xa0),
             },
             counter_range: 1..100,
-            extension_word_length: 4
+            extension_word_length: 4,
         };
 
         assert_eq!(
-            Some(
-                HashMatch {
-                    data: format!(
-                        "\
-                            commit {}\x00\
-                            tree 0123456701234567012345670123456701234567\n\
-                            parent 7654321076543210765432107654321076543210\n\
-                            author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                            committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                            gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
-                            \n\
-                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                            =AAAA\n\
-                            -----END PGP SIGNATURE-----\n\
-                            \n\
-                            Do a thing\n\
-                            \n\
-                            Makes some changes to the foo feature\n\
-                        ",
-                        TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
-                        "  \t\t\t\t\t                         "
-                    ).into_bytes(),
-                    hash: [60, 14, 227, 164, 209, 218, 169, 30, 57, 111, 16, 239, 90, 26, 77, 144, 229, 220, 205, 46]
-                }
-            ),
+            Some(HashMatch {
+                data: format!(
+                    "\
+                     commit {}\x00\
+                     tree 0123456701234567012345670123456701234567\n\
+                     parent 7654321076543210765432107654321076543210\n\
+                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                     gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
+                     \n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     =AAAA\n\
+                     -----END PGP SIGNATURE-----\n\
+                     \n\
+                     Do a thing\n\
+                     \n\
+                     Makes some changes to the foo feature\n\
+                     ",
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
+                    "  \t\t\t\t\t                         "
+                )
+                .into_bytes(),
+                hash: [
+                    60, 14, 227, 164, 209, 218, 169, 30, 57, 111, 16, 239, 90, 26, 77, 144, 229,
+                    220, 205, 46
+                ]
+            }),
             iterate_for_match(&search_params)
         )
     }
@@ -494,20 +508,21 @@ mod tests {
             ProcessedCommitMessage {
                 full_message: format!(
                     "\
-                        commit {}\x00\
-                        tree 0123456701234567012345670123456701234567\n\
-                        parent 7654321076543210765432107654321076543210\n\
-                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                        \n\
-                        Do a thing\n\
-                        \n\
-                        Makes some changes to the foo feature\
-                        {}\n\
-                    ",
+                     commit {}\x00\
+                     tree 0123456701234567012345670123456701234567\n\
+                     parent 7654321076543210765432107654321076543210\n\
+                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                     \n\
+                     Do a thing\n\
+                     \n\
+                     Makes some changes to the foo feature\
+                     {}\n\
+                     ",
                     TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE.len() + 32,
                     iter::repeat(" ").take(32).collect::<String>()
-                ).into_bytes(),
+                )
+                .into_bytes(),
                 whitespace_index: 259
             },
             process_commit_message(TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE, 32)
@@ -520,29 +535,30 @@ mod tests {
             ProcessedCommitMessage {
                 full_message: format!(
                     "\
-                        commit {}\x00\
-                        tree 0123456701234567012345670123456701234567\n\
-                        parent 7654321076543210765432107654321076543210\n\
-                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                        gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
-                        \n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        =AAAA\n\
-                        -----END PGP SIGNATURE-----\n\
-                        \n\
-                        Do a thing\n\
-                        \n\
-                        Makes some changes to the foo feature\n\
-                    ",
+                     commit {}\x00\
+                     tree 0123456701234567012345670123456701234567\n\
+                     parent 7654321076543210765432107654321076543210\n\
+                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                     gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
+                     \n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     =AAAA\n\
+                     -----END PGP SIGNATURE-----\n\
+                     \n\
+                     Do a thing\n\
+                     \n\
+                     Makes some changes to the foo feature\n\
+                     ",
                     TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 64,
                     iter::repeat(" ").take(64).collect::<String>()
-                ).into_bytes(),
+                )
+                .into_bytes(),
                 whitespace_index: 245
             },
             process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE, 64)
@@ -555,54 +571,55 @@ mod tests {
             ProcessedCommitMessage {
                 full_message: format!(
                     "\
-                        commit {}\x00\
-                        tree 0123456701234567012345670123456701234567\n\
-                        parent 7654321076543210765432107654321076543210\n\
-                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                        gpgsig {}-----BEGIN PGP SIGNATURE-----{}\n\
-                        \n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        =AAAA\n\
-                        -----END PGP SIGNATURE-----\n\
-                        \n\
-                        Do a thing\n\
-                        \n\
-                        Makes some changes to the foo feature\n\
-                    ",
+                     commit {}\x00\
+                     tree 0123456701234567012345670123456701234567\n\
+                     parent 7654321076543210765432107654321076543210\n\
+                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                     gpgsig {}-----BEGIN PGP SIGNATURE-----{}\n\
+                     \n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     =AAAA\n\
+                     -----END PGP SIGNATURE-----\n\
+                     \n\
+                     Do a thing\n\
+                     \n\
+                     Makes some changes to the foo feature\n\
+                     ",
                     TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 64,
                     iter::repeat("\t").take(32).collect::<String>(),
                     iter::repeat(" ").take(32).collect::<String>()
-                ).into_bytes(),
+                )
+                .into_bytes(),
                 whitespace_index: 277
             },
             process_commit_message(
                 &format!(
                     "\
-                        tree 0123456701234567012345670123456701234567\n\
-                        parent 7654321076543210765432107654321076543210\n\
-                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                        gpgsig {}-----BEGIN PGP SIGNATURE-----{}\n\
-                        \n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                        =AAAA\n\
-                        -----END PGP SIGNATURE-----\n\
-                        \n\
-                        Do a thing\n\
-                        \n\
-                        Makes some changes to the foo feature\n\
-                    ",
+                     tree 0123456701234567012345670123456701234567\n\
+                     parent 7654321076543210765432107654321076543210\n\
+                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                     gpgsig {}-----BEGIN PGP SIGNATURE-----{}\n\
+                     \n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     =AAAA\n\
+                     -----END PGP SIGNATURE-----\n\
+                     \n\
+                     Do a thing\n\
+                     \n\
+                     Makes some changes to the foo feature\n\
+                     ",
                     iter::repeat("\t").take(32).collect::<String>(),
                     iter::repeat("\t").take(64).collect::<String>()
                 ),
@@ -653,93 +670,79 @@ mod tests {
 
     #[test]
     fn matches_desired_prefix_empty() {
-        assert!(
-            matches_desired_prefix(
-                &[0; SHA1_BYTE_LENGTH],
-                &HashPrefix {
-                    data: Vec::new(),
-                    half_byte: None
-                }
-            )
-        )
+        assert!(matches_desired_prefix(
+            &[0; SHA1_BYTE_LENGTH],
+            &HashPrefix {
+                data: Vec::new(),
+                half_byte: None
+            }
+        ))
     }
 
     #[test]
     fn matches_desired_prefix_single_half() {
-        assert!(
-            matches_desired_prefix(
-                &[0x1e; SHA1_BYTE_LENGTH],
-                &HashPrefix {
-                    data: Vec::new(),
-                    half_byte: Some(0x10)
-                }
-            )
-        )
+        assert!(matches_desired_prefix(
+            &[0x1e; SHA1_BYTE_LENGTH],
+            &HashPrefix {
+                data: Vec::new(),
+                half_byte: Some(0x10)
+            }
+        ))
     }
 
     #[test]
     fn matches_desired_prefix_single_half_mismatch() {
-        assert!(
-            !matches_desired_prefix(
-                &[0x21; SHA1_BYTE_LENGTH],
-                &HashPrefix {
-                    data: Vec::new(),
-                    half_byte: Some(0x10)
-                }
-            )
-        )
+        assert!(!matches_desired_prefix(
+            &[0x21; SHA1_BYTE_LENGTH],
+            &HashPrefix {
+                data: Vec::new(),
+                half_byte: Some(0x10)
+            }
+        ))
     }
 
     #[test]
     fn matches_desired_prefix_data_without_half() {
-        assert!(
-            matches_desired_prefix(
-                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-                &HashPrefix {
-                    data: vec![1, 2, 3],
-                    half_byte: None
-                }
-            )
-        )
+        assert!(matches_desired_prefix(
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+            &HashPrefix {
+                data: vec![1, 2, 3],
+                half_byte: None
+            }
+        ))
     }
 
     #[test]
     fn matches_desired_prefix_matching_data_and_half() {
-        assert!(
-            matches_desired_prefix(
-                &[1, 2, 3, 0x4f, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-                &HashPrefix {
-                    data: vec![1, 2, 3],
-                    half_byte: Some(0x40)
-                }
-            )
-        )
+        assert!(matches_desired_prefix(
+            &[1, 2, 3, 0x4f, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+            &HashPrefix {
+                data: vec![1, 2, 3],
+                half_byte: Some(0x40)
+            }
+        ))
     }
 
     #[test]
     fn matches_desired_prefix_matching_data_mismatching_half() {
-        assert!(
-            !matches_desired_prefix(
-                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-                &HashPrefix {
-                    data: vec![1, 2, 3],
-                    half_byte: Some(0x50)
-                }
-            )
-        )
+        assert!(!matches_desired_prefix(
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+            &HashPrefix {
+                data: vec![1, 2, 3],
+                half_byte: Some(0x50)
+            }
+        ))
     }
 
     #[test]
     fn matches_desired_prefix_mismatching_data_matching_half() {
-        assert!(
-            !matches_desired_prefix(
-                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-                &HashPrefix {
-                    data: vec![1, 5, 3],
-                    half_byte: Some(0x40)
-                }
-            )
-        )
+        assert!(!matches_desired_prefix(
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+            &HashPrefix {
+                data: vec![1, 5, 3],
+                half_byte: Some(0x40)
+            }
+        ))
     }
 
     #[test]
