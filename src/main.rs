@@ -204,19 +204,17 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     let processed_message = process_commit_message(&params.current_message, extension_length);
 
     let mut hash_data = processed_message.full_message;
-    let whitespace_index = processed_message.whitespace_index;
-
     let mut sha1_hash = sha1::Sha1::new();
     let mut hash_result: [u8; SHA1_BYTE_LENGTH] = [0; SHA1_BYTE_LENGTH];
 
+    let padding_index_in_message = processed_message.whitespace_index;
     for counter in params.counter_range.clone() {
-        let mut whitespace_word_index = 0;
-        while whitespace_word_index < extension_length {
-            let start_index = whitespace_index + whitespace_word_index;
-            let padding_index = (counter >> whitespace_word_index) as u8 as usize;
-            &mut hash_data[start_index..start_index + 8]
-                .copy_from_slice(&padding::PADDING_LIST[padding_index]);
-            whitespace_word_index += 8;
+        let padding_data =
+            &mut hash_data[padding_index_in_message..padding_index_in_message + extension_length];
+        for index_within_padding in (0..extension_length).step_by(8) {
+            &mut padding_data[index_within_padding..index_within_padding + 8].copy_from_slice(
+                &padding::PADDING_LIST[(counter >> index_within_padding) as u8 as usize],
+            );
         }
 
         sha1_hash.input(&hash_data);

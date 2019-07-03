@@ -2,6 +2,7 @@
 name = "lucky_commit"
 version = "1.0.2"
 authors = ["Teddy Katz <teddy.katz@gmail.com>"]
+edition = "2018"
 description = "Make your git commits lucky!"
 repository = "https://github.com/not-an-aardvark/lucky-commit"
 license = "MIT"
