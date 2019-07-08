@@ -174,14 +174,11 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
 
 fn spawn_hash_searcher(result_sender: mpsc::Sender<Option<HashMatch>>, params: SearchParams) {
     thread::spawn(move || {
-        match result_sender.send(iterate_for_match(&params)) {
-            /*
-             * If an error occurs when sending, then the receiver has already received
-             * a match from another thread, so ignore the error.
-             */
-            Ok(_) => (),
-            Err(_) => (),
-        }
+        /*
+         * If an error occurs when sending, then the receiver has already received
+         * a match from another thread, so ignore the error.
+         */
+        let _ = result_sender.send(iterate_for_match(&params));
     });
 }
 
