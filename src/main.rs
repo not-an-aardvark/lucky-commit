@@ -302,8 +302,7 @@ fn create_git_object_file(search_result: &HashMatch) -> io::Result<()> {
     let git_dir_bytes = run_command("git", &["rev-parse", "--git-dir"]);
     let mut git_dir =
         String::from_utf8(git_dir_bytes).expect("git rev-parse --git-dir returned invalid utf8");
-    let len = git_dir.len();
-    git_dir.truncate(len - 1);
+    git_dir.truncate(git_dir.len() - 1);
     let dir_path = format!("{}/objects/{:02x}", git_dir, search_result.hash[0]);
     let file_path = format!("{}/{}", dir_path, to_hex_string(&search_result.hash[1..]));
 
