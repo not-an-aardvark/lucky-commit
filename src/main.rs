@@ -268,21 +268,28 @@ fn process_commit_message(
 fn get_commit_message_split_index(message: &str) -> usize {
     /*
      * If the commit has a GPG signature (detected by the presence of "-----BEGIN PGP SIGNATURE-----" on
-     * the fifth line), then add the padding whitespace immediately after the text "-----BEGIN PGP SIGNATURE-----".
+     * on a line that starts with "gpgsig "), then add the padding whitespace immediately after the text
+     * "-----BEGIN PGP SIGNATURE-----".
      * Otherwise, add the padding whitespace right before the end of the commit message.
      *
      * If a signature is present, modifying the commit message would make the signature invalid.
      */
-    let mut current_line_index = 0;
+    let mut on_gpgsig_line = false;
     const SIGNATURE_MARKER: &str = "-----BEGIN PGP SIGNATURE-----";
     for (index, character) in message.char_indices() {
-        if current_line_index == 4 {
-            if message[index..].starts_with(SIGNATURE_MARKER) {
-                return index + SIGNATURE_MARKER.len();
-            }
-        }
-        if character == '\n' {
-            current_line_index += 1;
+        if message[index..].starts_with("\ngpgsig ") {
+            on_gpgsig_line = true;
+        } else if message[index..].starts_with("\n\n") {
+            // We've reached the commit message and no GPG signature has been found.
+            // Add the padding to the end of the commit.
+            break;
+        } else if on_gpgsig_line && character == '\n' {
+            // There was a line starting with `gpgsig ` but it didn't have any signature for
+            // some reason. This shouldn't happen for well-formed commits -- bail out and
+            // add the padding to the end of the commit.
+            break;
+        } else if on_gpgsig_line && message[index..].starts_with(SIGNATURE_MARKER) {
+            return index + SIGNATURE_MARKER.len();
         }
     }
 
@@ -334,8 +341,7 @@ mod tests {
 
     use super::*;
 
-    const TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE: &str =
-        "\
+    const TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE: &str = "\
          tree 0123456701234567012345670123456701234567\n\
          parent 7654321076543210765432107654321076543210\n\
          author Foo Bár <foo@example.com> 1513980859 -0500\n\
@@ -346,8 +352,7 @@ mod tests {
          Makes some changes to the foo feature\n\
          ";
 
-    const TEST_COMMIT_MESSAGE_WITH_SIGNATURE: &str =
-        "\
+    const TEST_COMMIT_MESSAGE_WITH_SIGNATURE: &str = "\
          tree 0123456701234567012345670123456701234567\n\
          parent 7654321076543210765432107654321076543210\n\
          author Foo Bár <foo@example.com> 1513980859 -0500\n\
@@ -367,6 +372,49 @@ mod tests {
          \n\
          Makes some changes to the foo feature\n\
          ";
+
+    const TEST_COMMIT_MESSAGE_WITH_SIGNATURE_AND_MULTIPLE_PARENTS: &str = "\
+        tree 0123456701234567012345670123456701234567\n\
+        parent 7654321076543210765432107654321076543210\n\
+        parent 2468246824682468246824682468246824682468\n\
+        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+        gpgsig -----BEGIN PGP SIGNATURE-----\n\
+        \n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        =AAAA\n\
+        -----END PGP SIGNATURE-----\n\
+        \n\
+        Do a thing\n\
+        \n\
+        Makes some changes to the foo feature\n\
+        ";
+
+    const TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE: &str = "\
+        tree 0123456701234567012345670123456701234567\n\
+        parent 7654321076543210765432107654321076543210\n\
+        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+        \n\
+        For no particular reason, this commit message looks like a GPG signature.\n\
+        gpgsig -----BEGIN PGP SIGNATURE-----\n\
+        \n\
+        So anyway, that's fun.\n\
+        ";
+
+    const TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL: &str = "\
+        tree 0123456701234567012345670123456701234567\n\
+        parent 7654321076543210765432107654321076543210\n\
+        author Foo Bár <-----BEGIN PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
+        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+        \n\
+        For no particular reason, the commit author's email has a GPG signature marker.\n\
+        ";
 
     #[test]
     fn parse_prefix_empty() {
@@ -620,6 +668,94 @@ mod tests {
                 ),
                 32
             )
+        )
+    }
+
+    #[test]
+    fn process_merge_commit_with_signature() {
+        assert_eq!(
+            ProcessedCommitMessage {
+                full_message: format!(
+                    "\
+                     commit {}\x00\
+                     tree 0123456701234567012345670123456701234567\n\
+                     parent 7654321076543210765432107654321076543210\n\
+                     parent 2468246824682468246824682468246824682468\n\
+                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                     gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
+                     \n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                     =AAAA\n\
+                     -----END PGP SIGNATURE-----\n\
+                     \n\
+                     Do a thing\n\
+                     \n\
+                     Makes some changes to the foo feature\n\
+                     ",
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE_AND_MULTIPLE_PARENTS.len() + 64,
+                    iter::repeat(" ").take(64).collect::<String>()
+                )
+                .into_bytes(),
+                whitespace_index: 293
+            },
+            process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE_AND_MULTIPLE_PARENTS, 64)
+        );
+    }
+
+    #[test]
+    fn process_commit_message_with_gpg_stuff_in_message() {
+        assert_eq!(
+            ProcessedCommitMessage {
+                full_message: format!(
+                    "\
+                     commit {}\x00\
+                     tree 0123456701234567012345670123456701234567\n\
+                     parent 7654321076543210765432107654321076543210\n\
+                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                     \n\
+                     For no particular reason, this commit message looks like a GPG signature.\n\
+                     gpgsig -----BEGIN PGP SIGNATURE-----\n\
+                     \n\
+                     So anyway, that's fun.{}\n\
+                     ",
+                    TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE.len() + 32,
+                    iter::repeat(" ").take(32).collect::<String>()
+                )
+                .into_bytes(),
+                whitespace_index: 344
+            },
+            process_commit_message(TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE, 32)
+        )
+    }
+
+    #[test]
+    fn process_commit_message_with_gpg_stuff_in_email() {
+        assert_eq!(
+            ProcessedCommitMessage {
+                full_message: format!(
+                    "\
+                     commit {}\x00\
+                     tree 0123456701234567012345670123456701234567\n\
+                     parent 7654321076543210765432107654321076543210\n\
+                     author Foo Bár <-----BEGIN PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
+                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                     \n\
+                     For no particular reason, the commit author's email has a GPG signature marker.{}\n\
+                     ",
+                    TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL.len() + 32,
+                    iter::repeat(" ").take(32).collect::<String>()
+                )
+                .into_bytes(),
+                whitespace_index: 315
+            },
+            process_commit_message(TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL, 32)
         )
     }
 
