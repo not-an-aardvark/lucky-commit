@@ -1,11 +1,6 @@
-extern crate crypto;
-extern crate flate2;
-extern crate num_cpus;
-
 mod padding;
 
-use crypto::digest::Digest;
-use crypto::sha1;
+use sha1::{digest::FixedOutput, Digest, Sha1};
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -201,8 +196,8 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     let processed_message = process_commit_message(&params.current_message, extension_length);
 
     let mut hash_data = processed_message.full_message;
-    let mut sha1_hash = sha1::Sha1::new();
-    let mut hash_result: [u8; SHA1_BYTE_LENGTH] = [0; SHA1_BYTE_LENGTH];
+    let mut sha1_hash = Sha1::new();
+    let mut hash_result = Default::default();
 
     let padding_index_in_message = processed_message.whitespace_index;
     for counter in params.counter_range.clone() {
@@ -214,17 +209,15 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
             );
         }
 
-        sha1_hash.input(&hash_data);
-        sha1_hash.result(&mut hash_result);
+        sha1_hash.update(&hash_data);
+        sha1_hash.finalize_into_reset(&mut hash_result);
 
-        if matches_desired_prefix(&hash_result, desired_prefix) {
+        if matches_desired_prefix(hash_result.as_ref(), desired_prefix) {
             return Some(HashMatch {
                 data: hash_data,
-                hash: hash_result,
+                hash: hash_result.into(),
             });
         }
-
-        sha1_hash.reset();
     }
 
     None

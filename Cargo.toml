@@ -11,4 +11,4 @@ license = "MIT"
 
 flate2 = "1.0"
 num_cpus = "1.0"
-rust-crypto = "^0.2"
+"sha-1" = "0.9"

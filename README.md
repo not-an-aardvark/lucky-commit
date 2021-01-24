@@ -58,7 +58,7 @@ To install an older version, see the instructions in the `README.md` file on the
 
 ## Performance
 
-* `lucky-commit`'s main performance bottleneck is SHA1 throughput. On a single core of a 2015 MacBook Pro, `rust-crypto`'s SHA1 implementation has a throughput of 350-550 MB/s.<sup>1</sup>
+* `lucky-commit`'s main performance bottleneck is SHA1 throughput. On a single core of a 2015 MacBook Pro, [`RustCrypto`'s SHA1 implementation](https://github.com/RustCrypto/hashes/tree/a18e0bdaac45ad97419292b24fb1e3d470336d11/sha1) has a throughput of 350-550 MB/s.<sup>1</sup>
 * Long hash prefixes require more hash computations. The default hash prefix of `0000000` has length 7, so an average of 16<sup>7</sup> hashes are needed.
 * Large git commit objects increase the amount of data that needs to be hashed on each iteration.
     * A git commit object with a short commit message is typically about 250 bytes.
