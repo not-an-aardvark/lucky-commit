@@ -64,7 +64,7 @@ checksum = "36fbc8a8929c632868295d0178dd8f63fc423fd7537ad0738372bd010b3ac9b0"
 
 [[package]]
 name = "lucky_commit"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "flate2",
  "num_cpus",
