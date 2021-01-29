@@ -193,28 +193,36 @@ fn split_range(min: u64, max: u64, num_segments: usize) -> Vec<ops::Range<u64>> 
 fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     let desired_prefix = &params.desired_prefix;
     let extension_length = params.extension_word_length * 8;
-    let processed_message = process_commit_message(&params.current_message, extension_length);
+    let mut processed_message = process_commit_message(&params.current_message, extension_length);
 
-    let mut hash_data = processed_message.full_message;
-    let mut sha1_hash = Sha1::new();
+    // SHA1 works by splitting the input data into 64-byte blocks. Each 64-byte block
+    // can be processed in sequence. Since we're adding whitespace near the end of a
+    // commit object, the first few 64-byte blocks of the message will always be the same.
+    // Instead of reprocessing those blocks every time, we can just cache the SHA1 state
+    // after processing those blocks, and only process the new padding each time.
+    let mut sha1_state_preceding_whitespace = Sha1::new();
+    sha1_state_preceding_whitespace
+        .update(&processed_message.full_message[0..processed_message.whitespace_index]);
+
+    let commit_starting_at_whitespace =
+        &mut processed_message.full_message[processed_message.whitespace_index..];
     let mut hash_result = Default::default();
 
-    let padding_index_in_message = processed_message.whitespace_index;
     for counter in params.counter_range.clone() {
-        let padding_data =
-            &mut hash_data[padding_index_in_message..padding_index_in_message + extension_length];
         for index_within_padding in (0..extension_length).step_by(8) {
-            &mut padding_data[index_within_padding..index_within_padding + 8].copy_from_slice(
-                &padding::PADDING_LIST[(counter >> index_within_padding) as u8 as usize],
-            );
+            &mut commit_starting_at_whitespace[index_within_padding..index_within_padding + 8]
+                .copy_from_slice(
+                    &padding::PADDING_LIST[(counter >> index_within_padding) as u8 as usize],
+                );
         }
 
-        sha1_hash.update(&hash_data);
+        let mut sha1_hash = sha1_state_preceding_whitespace.clone();
+        sha1_hash.update(&commit_starting_at_whitespace);
         sha1_hash.finalize_into_reset(&mut hash_result);
 
         if matches_desired_prefix(hash_result.as_ref(), desired_prefix) {
             return Some(HashMatch {
-                data: hash_data,
+                data: processed_message.full_message,
                 hash: hash_result.into(),
             });
         }
