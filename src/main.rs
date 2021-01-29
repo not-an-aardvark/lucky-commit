@@ -19,6 +19,9 @@ use std::u8;
 
 const SHA1_BYTE_LENGTH: usize = 20;
 
+// See the comment in `process_commit_message` for the commit and padding layout.
+const DYNAMIC_PADDING_LENGTH: usize = 48;
+
 #[derive(Debug, PartialEq)]
 struct HashPrefix {
     data: Vec<u8>,
@@ -38,7 +41,6 @@ struct SearchParams {
     current_message: String,
     desired_prefix: HashPrefix,
     counter_range: ops::Range<u64>,
-    extension_word_length: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -130,8 +132,7 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
 fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<HashMatch> {
     let num_threads = num_cpus::get_physical();
     let (shared_sender, receiver) = mpsc::channel();
-    let u32_ranges = split_range(0, 1u64 << 32, num_threads);
-    let u64_ranges = split_range(0, u64::MAX, num_threads);
+    let counter_ranges = split_range(0, 1u64 << 48, num_threads);
 
     for thread_index in 0..num_threads {
         spawn_hash_searcher(
@@ -139,28 +140,15 @@ fn find_match(current_message: &str, desired_prefix: &HashPrefix) -> Option<Hash
             SearchParams {
                 current_message: current_message.to_owned(),
                 desired_prefix: desired_prefix.clone(),
-                counter_range: u32_ranges[thread_index].clone(),
-                extension_word_length: 4,
+                counter_range: counter_ranges[thread_index].clone(),
             },
         );
     }
 
-    for thread_index in 0..num_threads * 2 {
+    for _ in 0..num_threads {
         let result = receiver.recv().unwrap();
         if result.is_some() {
             return result;
-        }
-
-        if thread_index < num_threads {
-            spawn_hash_searcher(
-                shared_sender.clone(),
-                SearchParams {
-                    current_message: current_message.to_owned(),
-                    desired_prefix: desired_prefix.clone(),
-                    counter_range: u64_ranges[thread_index].clone(),
-                    extension_word_length: 8,
-                },
-            );
         }
     }
 
@@ -192,8 +180,7 @@ fn split_range(min: u64, max: u64, num_segments: usize) -> Vec<ops::Range<u64>> 
 
 fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     let desired_prefix = &params.desired_prefix;
-    let extension_length = params.extension_word_length * 8;
-    let mut processed_message = process_commit_message(&params.current_message, extension_length);
+    let mut processed_message = process_commit_message(&params.current_message);
 
     // SHA1 works by splitting the input data into 64-byte blocks. Each 64-byte block
     // can be processed in sequence. Since we're adding whitespace near the end of a
@@ -209,7 +196,7 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     let mut hash_result = Default::default();
 
     for counter in params.counter_range.clone() {
-        for index_within_padding in (0..extension_length).step_by(8) {
+        for index_within_padding in (0..DYNAMIC_PADDING_LENGTH).step_by(8) {
             &mut commit_starting_at_whitespace[index_within_padding..index_within_padding + 8]
                 .copy_from_slice(
                     &padding::PADDING_LIST[(counter >> index_within_padding) as u8 as usize],
@@ -231,32 +218,71 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     None
 }
 
-fn process_commit_message(
-    original_message: &str,
-    extension_length: usize,
-) -> ProcessedCommitMessage {
+fn process_commit_message(original_message: &str) -> ProcessedCommitMessage {
+    // The fully padded data that gets hashed is the concatenation of all the following:
+    // * "commit " + length + "\x00", where `length` is the base-10 representation of the length
+    //    of everything that follows the null character.
+    // * The original commit object, containing everything up to the point where padding should be
+    //   added.
+    // * Up to 63 space characters, as static padding. This is inserted so that the dynamic padding
+    //   that follows it will be at a multiple-of-64-byte offset. Since the performance-intensive
+    //   search involves hashing all of the 64-byte blocks starting with the dynamic padding, this
+    //   ensures that the dynamic padding is always in a single block. Note that it sometimes won't
+    //   be possible to align the dynamic padding perfectly, because adding static padding also
+    //   increases the length of the commit object used in the initial header, and this could
+    //   bump the alignment twice if e.g. the length increases from 999 to 1000. As a result, in
+    //   rare cases the dynamic padding will actually be at a multiple-of-64-byte + 1 offset,
+    //   which isn't the end of the world because everything that follows the static padding
+    //   will usually fit in one block anyway.
+    // * 48 bytes of dynamic padding, consisting of space and tab characters. The ultimate goal
+    //   is to find some combination of spaces and tabs that produces the desired hash. A 48-byte
+    //   length was chosen with the goal of having everything that follows the static padding
+    //   fit into one block for non-GPG-signed commits. (This allows 8 bytes for SHA1's final
+    //   length padding, as well as a couple bytes for the remainder of the commit object and
+    //   any alignment issues, while still using a multiple of 8 bytes for easily copying padding.)
+    // * The rest of the original commit object. For non-GPG-signed commits, this will just be
+    //   a single newline. For GPG-signed commits, this will contain the commit message.
+
+    const DYNAMIC_PADDING_ALIGNMENT: usize = 64;
     let commit_split_index = get_commit_message_split_index(original_message);
     let trimmable_paddings: &[_] = &[' ', '\t'];
     let trimmed_end_half =
         original_message[commit_split_index..].trim_start_matches(trimmable_paddings);
+    let length_before_static_padding =
+        format!("commit {}\x00", commit_split_index).len() + commit_split_index;
+    let static_padding_length = (DYNAMIC_PADDING_ALIGNMENT
+        - (length_before_static_padding % DYNAMIC_PADDING_ALIGNMENT))
+        % DYNAMIC_PADDING_ALIGNMENT;
 
     let mut message_object: Vec<u8> = format!(
         "commit {}\x00",
-        original_message[..commit_split_index].len() + extension_length + trimmed_end_half.len()
+        commit_split_index
+            + static_padding_length
+            + DYNAMIC_PADDING_LENGTH
+            + trimmed_end_half.len()
     )
     .into_bytes();
 
-    let whitespace_index = commit_split_index + message_object.len();
+    let whitespace_index = message_object.len() + commit_split_index + static_padding_length;
+    assert!(whitespace_index % DYNAMIC_PADDING_ALIGNMENT <= 2);
 
     for character in original_message[..commit_split_index].as_bytes() {
+        // Add the first half of the original commit
         message_object.push(*character);
     }
 
-    for _ in 0..extension_length {
+    for _ in 0..static_padding_length {
+        // Add static padding
         message_object.push(padding::SPACE);
     }
 
+    for _ in 0..DYNAMIC_PADDING_LENGTH {
+        // Add dynamic padding, initialized to tabs for now
+        message_object.push(padding::TAB);
+    }
+
     for character in trimmed_end_half.as_bytes() {
+        // Add the rest of the commit
         message_object.push(*character);
     }
 
@@ -487,7 +513,6 @@ mod tests {
                 half_byte: Some(0x40),
             },
             counter_range: 1..100,
-            extension_word_length: 4,
         };
 
         assert_eq!(None, iterate_for_match(&search_params))
@@ -498,11 +523,10 @@ mod tests {
         let search_params = SearchParams {
             current_message: TEST_COMMIT_MESSAGE_WITH_SIGNATURE.to_owned(),
             desired_prefix: HashPrefix {
-                data: vec![172, 114, 81],
-                half_byte: Some(0x40),
+                data: vec![73, 174],
+                half_byte: Some(0x80),
             },
             counter_range: 1..100,
-            extension_word_length: 4,
         };
 
         assert_eq!(
@@ -523,17 +547,21 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----{}\n\
+                     -----END PGP SIGNATURE-----{}{}\n\
                      \n\
                      Do a thing\n\
                      \n\
                      Makes some changes to the foo feature\n\
                      ",
-                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
-                    "  \t  \t\t                         "
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 40 + 48,
+                    iter::repeat(" ").take(40).collect::<String>(),
+                    "    \t \t                                         "
                 )
                 .into_bytes(),
-                hash: [172, 114, 81, 76, 93, 32, 73, 69, 106, 185, 152, 66, 207, 96, 129, 154, 139, 23, 199, 184]
+                hash: [
+                    73, 174, 143, 115, 152, 190, 169, 211, 5, 49, 116, 178, 8, 186, 106, 125, 3,
+                    169, 65, 184
+                ]
             }),
             iterate_for_match(&search_params)
         )
@@ -554,15 +582,16 @@ mod tests {
                      Do a thing\n\
                      \n\
                      Makes some changes to the foo feature\
-                     {}\n\
+                     {}{}\n\
                      ",
-                    TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE.len() + 32,
-                    iter::repeat(" ").take(32).collect::<String>()
+                    TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE.len() + 61 + 48,
+                    iter::repeat(" ").take(61).collect::<String>(),
+                    iter::repeat("\t").take(48).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 259
+                whitespace_index: 320
             },
-            process_commit_message(TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE, 32)
+            process_commit_message(TEST_COMMIT_MESSAGE_WITHOUT_SIGNATURE)
         )
     }
 
@@ -586,19 +615,20 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----{}\n\
+                     -----END PGP SIGNATURE-----{}{}\n\
                      \n\
                      Do a thing\n\
                      \n\
                      Makes some changes to the foo feature\n\
                      ",
-                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 64,
-                    iter::repeat(" ").take(64).collect::<String>()
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 40 + 48,
+                    iter::repeat(" ").take(40).collect::<String>(),
+                    iter::repeat("\t").take(48).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 664
+                whitespace_index: 704
             },
-            process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE, 64)
+            process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE)
         );
     }
 
@@ -622,22 +652,22 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----{}\n\
+                     -----END PGP SIGNATURE-----{}{}\n\
                      \n\
                      Do a thing\n\
                      \n\
                      Makes some changes to the foo feature\n\
                      ",
-                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 64,
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32 + 8 + 48,
                     iter::repeat("\t").take(32).collect::<String>(),
-                    iter::repeat(" ").take(32).collect::<String>()
+                    iter::repeat(" ").take(8).collect::<String>(),
+                    iter::repeat("\t").take(48).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 696
+                whitespace_index: 704
             },
-            process_commit_message(
-                &format!(
-                    "\
+            process_commit_message(&format!(
+                "\
                      tree 0123456701234567012345670123456701234567\n\
                      parent 7654321076543210765432107654321076543210\n\
                      author Foo Bár <foo@example.com> 1513980859 -0500\n\
@@ -657,11 +687,9 @@ mod tests {
                      \n\
                      Makes some changes to the foo feature\n\
                      ",
-                    iter::repeat("\t").take(32).collect::<String>(),
-                    iter::repeat("\t").take(64).collect::<String>()
-                ),
-                32
-            )
+                iter::repeat("\t").take(32).collect::<String>(),
+                iter::repeat(" ").take(100).collect::<String>()
+            ))
         )
     }
 
@@ -686,19 +714,20 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----{}\n\
+                     -----END PGP SIGNATURE-----{}{}\n\
                      \n\
                      Do a thing\n\
                      \n\
                      Makes some changes to the foo feature\n\
                      ",
-                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE_AND_MULTIPLE_PARENTS.len() + 64,
-                    iter::repeat(" ").take(64).collect::<String>()
+                    TEST_COMMIT_MESSAGE_WITH_SIGNATURE_AND_MULTIPLE_PARENTS.len() + 56 + 48,
+                    iter::repeat(" ").take(56).collect::<String>(),
+                    iter::repeat("\t").take(48).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 712
+                whitespace_index: 768
             },
-            process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE_AND_MULTIPLE_PARENTS, 64)
+            process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE_AND_MULTIPLE_PARENTS)
         );
     }
 
@@ -717,15 +746,16 @@ mod tests {
                      For no particular reason, this commit message looks like a GPG signature.\n\
                      gpgsig -----END PGP SIGNATURE-----\n\
                      \n\
-                     So anyway, that's fun.{}\n\
+                     So anyway, that's fun.{}{}\n\
                      ",
-                    TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE.len() + 32,
-                    iter::repeat(" ").take(32).collect::<String>()
+                    TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE.len() + 42 + 48,
+                    iter::repeat(" ").take(42).collect::<String>(),
+                    iter::repeat("\t").take(48).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 342
+                whitespace_index: 384
             },
-            process_commit_message(TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE, 32)
+            process_commit_message(TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE)
         )
     }
 
@@ -741,15 +771,16 @@ mod tests {
                      author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
                      committer Baz Qux <baz@example.com> 1513980898 -0500\n\
                      \n\
-                     For no particular reason, the commit author's email has a GPG signature marker.{}\n\
+                     For no particular reason, the commit author's email has a GPG signature marker.{}{}\n\
                      ",
-                    TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL.len() + 32,
-                    iter::repeat(" ").take(32).collect::<String>()
+                    TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL.len() + 7 + 48,
+                    iter::repeat(" ").take(7).collect::<String>(),
+                    iter::repeat("\t").take(48).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 313
+                whitespace_index: 320
             },
-            process_commit_message(TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL, 32)
+            process_commit_message(TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL)
         )
     }
 
