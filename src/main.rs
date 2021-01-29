@@ -268,28 +268,25 @@ fn process_commit_message(
 
 fn get_commit_message_split_index(message: &str) -> usize {
     /*
-     * If the commit has a GPG signature (detected by the presence of "-----BEGIN PGP SIGNATURE-----" on
-     * on a line that starts with "gpgsig "), then add the padding whitespace immediately after the text
-     * "-----BEGIN PGP SIGNATURE-----".
+     * If the commit has a GPG signature (detected by the presence of "-----END PGP SIGNATURE-----"
+     * after a line that starts with "gpgsig "), then add the padding whitespace immediately after
+     * the text "-----END PGP SIGNATURE-----".
      * Otherwise, add the padding whitespace right before the end of the commit message.
      *
-     * If a signature is present, modifying the commit message would make the signature invalid.
+     * To save time hashing, we want the padding to be as close to the end of the commit message
+     * as possible. However, if a signature is present, modifying the commit message would make
+     * the signature invalid
      */
-    let mut on_gpgsig_line = false;
-    const SIGNATURE_MARKER: &str = "-----BEGIN PGP SIGNATURE-----";
-    for (index, character) in message.char_indices() {
+    let mut found_gpgsig_line = false;
+    const SIGNATURE_MARKER: &str = "-----END PGP SIGNATURE-----";
+    for (index, _character) in message.char_indices() {
         if message[index..].starts_with("\ngpgsig ") {
-            on_gpgsig_line = true;
-        } else if message[index..].starts_with("\n\n") {
+            found_gpgsig_line = true;
+        } else if !found_gpgsig_line && message[index..].starts_with("\n\n") {
             // We've reached the commit message and no GPG signature has been found.
             // Add the padding to the end of the commit.
             break;
-        } else if on_gpgsig_line && character == '\n' {
-            // There was a line starting with `gpgsig ` but it didn't have any signature for
-            // some reason. This shouldn't happen for well-formed commits -- bail out and
-            // add the padding to the end of the commit.
-            break;
-        } else if on_gpgsig_line && message[index..].starts_with(SIGNATURE_MARKER) {
+        } else if found_gpgsig_line && message[index..].starts_with(SIGNATURE_MARKER) {
             return index + SIGNATURE_MARKER.len();
         }
     }
@@ -402,7 +399,7 @@ mod tests {
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         \n\
         For no particular reason, this commit message looks like a GPG signature.\n\
-        gpgsig -----BEGIN PGP SIGNATURE-----\n\
+        gpgsig -----END PGP SIGNATURE-----\n\
         \n\
         So anyway, that's fun.\n\
         ";
@@ -410,7 +407,7 @@ mod tests {
     const TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL: &str = "\
         tree 0123456701234567012345670123456701234567\n\
         parent 7654321076543210765432107654321076543210\n\
-        author Foo Bár <-----BEGIN PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
+        author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         \n\
         For no particular reason, the commit author's email has a GPG signature marker.\n\
@@ -501,8 +498,8 @@ mod tests {
         let search_params = SearchParams {
             current_message: TEST_COMMIT_MESSAGE_WITH_SIGNATURE.to_owned(),
             desired_prefix: HashPrefix {
-                data: vec![60, 14, 227],
-                half_byte: Some(0xa0),
+                data: vec![172, 114, 81],
+                half_byte: Some(0x40),
             },
             counter_range: 1..100,
             extension_word_length: 4,
@@ -517,7 +514,7 @@ mod tests {
                      parent 7654321076543210765432107654321076543210\n\
                      author Foo Bár <foo@example.com> 1513980859 -0500\n\
                      committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
+                     gpgsig -----BEGIN PGP SIGNATURE-----\n\
                      \n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -526,20 +523,17 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----\n\
+                     -----END PGP SIGNATURE-----{}\n\
                      \n\
                      Do a thing\n\
                      \n\
                      Makes some changes to the foo feature\n\
                      ",
                     TEST_COMMIT_MESSAGE_WITH_SIGNATURE.len() + 32,
-                    "  \t\t\t\t\t                         "
+                    "  \t  \t\t                         "
                 )
                 .into_bytes(),
-                hash: [
-                    60, 14, 227, 164, 209, 218, 169, 30, 57, 111, 16, 239, 90, 26, 77, 144, 229,
-                    220, 205, 46
-                ]
+                hash: [172, 114, 81, 76, 93, 32, 73, 69, 106, 185, 152, 66, 207, 96, 129, 154, 139, 23, 199, 184]
             }),
             iterate_for_match(&search_params)
         )
@@ -583,7 +577,7 @@ mod tests {
                      parent 7654321076543210765432107654321076543210\n\
                      author Foo Bár <foo@example.com> 1513980859 -0500\n\
                      committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
+                     gpgsig -----BEGIN PGP SIGNATURE-----\n\
                      \n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -592,7 +586,7 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----\n\
+                     -----END PGP SIGNATURE-----{}\n\
                      \n\
                      Do a thing\n\
                      \n\
@@ -602,7 +596,7 @@ mod tests {
                     iter::repeat(" ").take(64).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 245
+                whitespace_index: 664
             },
             process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE, 64)
         );
@@ -619,7 +613,7 @@ mod tests {
                      parent 7654321076543210765432107654321076543210\n\
                      author Foo Bár <foo@example.com> 1513980859 -0500\n\
                      committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig {}-----BEGIN PGP SIGNATURE-----{}\n\
+                     gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
                      \n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -628,7 +622,7 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----\n\
+                     -----END PGP SIGNATURE-----{}\n\
                      \n\
                      Do a thing\n\
                      \n\
@@ -639,7 +633,7 @@ mod tests {
                     iter::repeat(" ").take(32).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 277
+                whitespace_index: 696
             },
             process_commit_message(
                 &format!(
@@ -648,7 +642,7 @@ mod tests {
                      parent 7654321076543210765432107654321076543210\n\
                      author Foo Bár <foo@example.com> 1513980859 -0500\n\
                      committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig {}-----BEGIN PGP SIGNATURE-----{}\n\
+                     gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
                      \n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -657,7 +651,7 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----\n\
+                     -----END PGP SIGNATURE-----{}\n\
                      \n\
                      Do a thing\n\
                      \n\
@@ -683,7 +677,7 @@ mod tests {
                      parent 2468246824682468246824682468246824682468\n\
                      author Foo Bár <foo@example.com> 1513980859 -0500\n\
                      committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig -----BEGIN PGP SIGNATURE-----{}\n\
+                     gpgsig -----BEGIN PGP SIGNATURE-----\n\
                      \n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -692,7 +686,7 @@ mod tests {
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
                      =AAAA\n\
-                     -----END PGP SIGNATURE-----\n\
+                     -----END PGP SIGNATURE-----{}\n\
                      \n\
                      Do a thing\n\
                      \n\
@@ -702,7 +696,7 @@ mod tests {
                     iter::repeat(" ").take(64).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 293
+                whitespace_index: 712
             },
             process_commit_message(TEST_COMMIT_MESSAGE_WITH_SIGNATURE_AND_MULTIPLE_PARENTS, 64)
         );
@@ -721,7 +715,7 @@ mod tests {
                      committer Baz Qux <baz@example.com> 1513980898 -0500\n\
                      \n\
                      For no particular reason, this commit message looks like a GPG signature.\n\
-                     gpgsig -----BEGIN PGP SIGNATURE-----\n\
+                     gpgsig -----END PGP SIGNATURE-----\n\
                      \n\
                      So anyway, that's fun.{}\n\
                      ",
@@ -729,7 +723,7 @@ mod tests {
                     iter::repeat(" ").take(32).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 344
+                whitespace_index: 342
             },
             process_commit_message(TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE, 32)
         )
@@ -744,7 +738,7 @@ mod tests {
                      commit {}\x00\
                      tree 0123456701234567012345670123456701234567\n\
                      parent 7654321076543210765432107654321076543210\n\
-                     author Foo Bár <-----BEGIN PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
+                     author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
                      committer Baz Qux <baz@example.com> 1513980898 -0500\n\
                      \n\
                      For no particular reason, the commit author's email has a GPG signature marker.{}\n\
@@ -753,7 +747,7 @@ mod tests {
                     iter::repeat(" ").take(32).collect::<String>()
                 )
                 .into_bytes(),
-                whitespace_index: 315
+                whitespace_index: 313
             },
             process_commit_message(TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL, 32)
         )
