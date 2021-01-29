@@ -47,7 +47,7 @@ $ cargo build --release
 
 This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
 
-I've rewritten the `lucky-commit` project several times as a method to learn new programming languages. As a result, there are several older implementations of `lucky-commit` in different languages. To install an older version ([`C`](https://github.com/not-an-aardvark/lucky-commit/tree/C) or [Node.js](https://github.com/not-an-aardvark/lucky-commit/tree/nodejs)), see the instructions in the `README.md` file on the corresponding branch.
+I've rewritten the `lucky-commit` project several times as a method to learn new programming languages. As a result, there are several older implementations of `lucky-commit` in different languages. To install an older version ([C](https://github.com/not-an-aardvark/lucky-commit/tree/C) or [Node.js](https://github.com/not-an-aardvark/lucky-commit/tree/nodejs)), see the instructions in the `README.md` file on the corresponding branch.
 
 
 ## Performance
