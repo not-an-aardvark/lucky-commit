@@ -124,13 +124,13 @@ fn find_match(current_commit: &str, desired_prefix: &HashPrefix) -> Option<HashM
     let (shared_sender, receiver) = mpsc::channel();
     let counter_ranges = split_range(0, 1u64 << 48, num_threads);
 
-    for thread_index in 0..num_threads {
+    for counter_range in counter_ranges {
         spawn_hash_searcher(
             shared_sender.clone(),
             SearchParams {
                 current_commit: current_commit.to_owned(),
                 desired_prefix: desired_prefix.clone(),
-                counter_range: counter_ranges[thread_index].clone(),
+                counter_range: counter_range.clone(),
             },
         );
     }
@@ -261,15 +261,10 @@ fn process_commit(original_commit: &str) -> ProcessedCommit {
         raw_object.push(*character);
     }
 
-    for _ in 0..static_padding_length {
-        // Add static padding
-        raw_object.push(b' ');
-    }
-
-    for _ in 0..DYNAMIC_PADDING_LENGTH {
-        // Add dynamic padding, initialized to tabs for now
-        raw_object.push(b'\t');
-    }
+    // Add static padding
+    raw_object.resize(raw_object.len() + static_padding_length, b' ');
+    // Add dynamic padding, initialized to tabs for now
+    raw_object.resize(raw_object.len() + DYNAMIC_PADDING_LENGTH, b'\t');
 
     for character in trimmed_end_half.as_bytes() {
         // Add the rest of the commit
@@ -311,7 +306,7 @@ fn get_commit_split_index(commit: &str) -> usize {
 }
 
 fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) -> bool {
-    prefix.data == &hash[..prefix.data.len()]
+    prefix.data == hash[..prefix.data.len()]
         && match prefix.half_byte {
             Some(half_byte) => (hash[prefix.data.len()] & 0xf0) == half_byte,
             None => true,
@@ -359,8 +354,8 @@ fn git_reset_to_hash(hash: &[u8; SHA1_BYTE_LENGTH]) {
 }
 
 fn to_hex_string(hash: &[u8]) -> String {
-    hash.into_iter()
-        .map(|byte| format!("{:02x}", byte))
+    hash.iter()
+        .map(|byte| format!("{:02x}", *byte))
         .collect::<String>()
 }
 
@@ -420,7 +415,6 @@ fn run_single_core_benchmark() {
             counter_range: 1..((1 << 28) / num_cpus::get_physical() as u64)
         })
     );
-    return;
 }
 
 #[cfg(test)]
