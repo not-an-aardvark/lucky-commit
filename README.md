@@ -56,10 +56,10 @@ I've rewritten the `lucky-commit` project several times as a method to learn new
 
 The main bottleneck is SHA1 throughput. The default hash prefix of `0000000` has length 7, so on average, `lucky-commit` needs to compute  16<sup>7</sup> SHA1 hashes.
 
-For non-GPG-signed commits, `lucky-commit` adds its whitespace to a 64-byte-aligned block at the very end of the commit message. Since everything that precedes the whitespace is constant for any particular commit, this allows `lucky-commit` to cache the SHA1 buffer state and only hash a single 64-byte block on each attempt. A single core of my 2015 MacBook Pro can compute 6.1 million single-block hashes per second. (Note that [hyper-threading](https://en.wikipedia.org/wiki/Hyper-threading) does not improve `lucky-commit`'s performance.) As a result, the total average time to find a `0000000` commit hash on my 2015 MacBook Pro is:
+For non-GPG-signed commits, `lucky-commit` adds its whitespace to a 64-byte-aligned block at the very end of the commit message. Since everything that precedes the whitespace is constant for any particular commit, this allows `lucky-commit` to cache the SHA1 buffer state and only hash a single 64-byte block on each attempt. A single core of my 2015 MacBook Pro can compute 6.4 million single-block hashes per second. (Note that [hyper-threading](https://en.wikipedia.org/wiki/Hyper-threading) does not improve `lucky-commit`'s performance.) As a result, the total average time to find a `0000000` commit hash on my 2015 MacBook Pro is:
 
 ```
-(16^7 hashes) / (6100000 hashes/s/core) / (2 physical cores) = 22 seconds
+(16^7 hashes) / (6400000 hashes/s/core) / (2 physical cores) = 21 seconds
 ```
 
 For GPG-signed commits, the commit message is part of the signed payload, so `lucky-commit` can't edit the commit message without making the signature invalid. Instead, it adds its whitespace to the end of the signature itself. Since the signature precedes the commit message in git's commit encoding, this requires `lucky-commit` to do more work on each attempt (it can't cache the SHA1 buffer state as effectively, and it needs to rehash the commit message every time). As a result, the performance for GPG-signed commits depends on the length of the commit message. As a rule of thumb, multiply the number above for non-GPG-signed commits by `1 + ceiling(commit message length / 64 bytes)` to get an estimated wait time for GPG-signed commits.

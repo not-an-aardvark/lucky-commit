@@ -187,19 +187,20 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     // commit object, the first few 64-byte blocks of the commit will always be the same.
     // Instead of reprocessing those blocks every time, we can just cache the SHA1 state
     // after processing those blocks, and only process the new padding each time.
-    let cached_sha1_state =
-        Sha1::new().chain(&processed_commit.raw_object[0..processed_commit.dynamic_padding_start_index]);
+    let cached_sha1_state = Sha1::new()
+        .chain(&processed_commit.raw_object[0..processed_commit.dynamic_padding_start_index]);
 
     let remaining_commit_data =
         &mut processed_commit.raw_object[processed_commit.dynamic_padding_start_index..];
     let mut hash_result = Default::default();
 
     for counter in params.counter_range.clone() {
-        for index_within_padding in (0..DYNAMIC_PADDING_LENGTH).step_by(8) {
-            &mut remaining_commit_data[index_within_padding..index_within_padding + 8]
-                .copy_from_slice(
-                    &padding::PADDING_LIST[(counter >> index_within_padding) as u8 as usize],
-                );
+        let dynamic_padding_data = &mut remaining_commit_data[0..DYNAMIC_PADDING_LENGTH];
+        for (padding_chunk, counter_byte) in dynamic_padding_data
+            .chunks_exact_mut(8)
+            .zip(counter.to_le_bytes().iter())
+        {
+            padding_chunk.copy_from_slice(&padding::PADDING_LIST[*counter_byte as usize]);
         }
 
         let mut sha1_hash = cached_sha1_state.clone();
