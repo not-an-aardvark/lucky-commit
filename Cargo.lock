@@ -10,12 +10,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cc"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9b13a57efd6b30ecd6598ebdb302cca617930b5470647570468a65d12ef9719"
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -34,16 +28,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3dd60d1080a57a05ab032377049e0591415d2b31afd7028356dbf3cc6dcb066"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "flate2"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fac2277e84e5e858483756647a9d0aa8d9a2b7cba517fd84325a0aaa69a0909"
-dependencies = [
- "libc",
- "miniz-sys",
 ]
 
 [[package]]
@@ -66,19 +50,8 @@ checksum = "36fbc8a8929c632868295d0178dd8f63fc423fd7537ad0738372bd010b3ac9b0"
 name = "lucky_commit"
 version = "1.0.4"
 dependencies = [
- "flate2",
  "num_cpus",
  "sha-1",
-]
-
-[[package]]
-name = "miniz-sys"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "609ce024854aeb19a0ef7567d348aaa5a746b32fb72e336df7fcc16869d7e2b4"
-dependencies = [
- "cc",
- "libc",
 ]
 
 [[package]]

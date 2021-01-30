@@ -2,15 +2,11 @@ mod padding;
 
 use sha1::{digest::FixedOutput, Digest, Sha1};
 
-use flate2::write::ZlibEncoder;
-use flate2::Compression;
-
 use std::env;
-use std::fs;
 use std::io;
 use std::io::Write;
 use std::ops;
-use std::process;
+use std::process::{exit, Command, Stdio};
 use std::str;
 use std::sync::mpsc;
 use std::thread;
@@ -36,7 +32,7 @@ struct SearchParams {
 
 #[derive(Debug, PartialEq)]
 struct HashMatch {
-    data: Vec<u8>,
+    raw_object: Vec<u8>,
     hash: [u8; SHA1_BYTE_LENGTH],
 }
 
@@ -70,7 +66,7 @@ fn print_usage_and_exit() -> ! {
 
 fn fail_with_message(message: &str) -> ! {
     eprintln!("{}", message);
-    process::exit(1)
+    exit(1)
 }
 
 fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
@@ -104,7 +100,7 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
 
     match find_match(current_commit, desired_prefix) {
         Some(hash_match) => {
-            create_git_object_file(&hash_match).expect("Failed to create git object file");
+            create_git_commit(&hash_match).expect("Failed to create git commit");
             git_reset_to_hash(&hash_match.hash);
         }
         None => fail_with_message("Failed to find a match"),
@@ -112,14 +108,14 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
 }
 
 fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
-    let output = process::Command::new(command)
+    let output = Command::new(command)
         .args(args)
-        .stderr(process::Stdio::inherit())
+        .stderr(Stdio::inherit())
         .output()
         .expect("Failed to run command");
 
     if !output.status.success() {
-        process::exit(1);
+        exit(1);
     }
 
     output.stdout
@@ -205,7 +201,7 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
 
         if matches_desired_prefix(hash_result.as_ref(), desired_prefix) {
             return Some(HashMatch {
-                data: processed_commit.raw_object,
+                raw_object: processed_commit.raw_object,
                 hash: hash_result.into(),
             });
         }
@@ -324,24 +320,40 @@ fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) ->
         }
 }
 
-fn create_git_object_file(search_result: &HashMatch) -> io::Result<()> {
-    let compressed_object = zlib_compress(&search_result.data)?;
-    let git_dir_bytes = run_command("git", &["rev-parse", "--git-dir"]);
-    let mut git_dir =
-        String::from_utf8(git_dir_bytes).expect("git rev-parse --git-dir returned invalid utf8");
-    git_dir.truncate(git_dir.len() - 1);
-    let dir_path = format!("{}/objects/{:02x}", git_dir, search_result.hash[0]);
-    let file_path = format!("{}/{}", dir_path, to_hex_string(&search_result.hash[1..]));
+fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
+    assert!(&search_result.raw_object[0..7] == b"commit ");
+    let commit_start_index = search_result
+        .raw_object
+        .iter()
+        .position(|byte| *byte == 0)
+        .expect("No null character found in constructed raw git object?")
+        + 1;
 
-    fs::DirBuilder::new().recursive(true).create(dir_path)?;
+    let mut git_hash_object_child = Command::new("git")
+        .args(&["hash-object", "-t", "commit", "-w", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()?;
 
-    fs::File::create(file_path)?.write_all(&compressed_object)
-}
+    git_hash_object_child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(&search_result.raw_object[commit_start_index..])?;
+    let output = git_hash_object_child.wait_with_output()?;
 
-fn zlib_compress(data: &[u8]) -> io::Result<Vec<u8>> {
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write(data)?;
-    encoder.finish()
+    if !output.status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "git hash-object failed"
+        ));
+    }
+    assert!(
+        String::from_utf8(output.stdout).unwrap().trim_end() == to_hex_string(&search_result.hash),
+        "Found a commit, but git unexpectedly computed a different hash for it"
+    );
+    Ok(())
 }
 
 fn git_reset_to_hash(hash: &[u8; SHA1_BYTE_LENGTH]) {
@@ -349,8 +361,8 @@ fn git_reset_to_hash(hash: &[u8; SHA1_BYTE_LENGTH]) {
 }
 
 fn to_hex_string(hash: &[u8]) -> String {
-    hash.iter()
-        .map(|byte| format!("{:02x}", *byte))
+    hash.into_iter()
+        .map(|byte| format!("{:02x}", byte))
         .collect::<String>()
 }
 
@@ -570,7 +582,7 @@ mod tests {
 
         assert_eq!(
             Some(HashMatch {
-                data: format!(
+                raw_object: format!(
                     "\
                      commit {}\x00\
                      tree 0123456701234567012345670123456701234567\n\

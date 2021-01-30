@@ -9,6 +9,5 @@ license = "MIT"
 
 [dependencies]
 
-flate2 = "1.0"
 num_cpus = "1.0"
 "sha-1" = "0.9"
