@@ -1,5 +1,3 @@
-mod padding;
-
 use sha1::{digest::FixedOutput, Digest, Sha1};
 
 use std::env;
@@ -192,7 +190,7 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
             .chunks_exact_mut(8)
             .zip(counter.to_le_bytes().iter())
         {
-            padding_chunk.copy_from_slice(&padding::PADDING_LIST[*counter_byte as usize]);
+            padding_chunk.copy_from_slice(&PADDINGS[*counter_byte as usize]);
         }
 
         let mut sha1_hash = cached_sha1_state.clone();
@@ -265,12 +263,12 @@ fn process_commit(original_commit: &str) -> ProcessedCommit {
 
     for _ in 0..static_padding_length {
         // Add static padding
-        raw_object.push(padding::SPACE);
+        raw_object.push(b' ');
     }
 
     for _ in 0..DYNAMIC_PADDING_LENGTH {
         // Add dynamic padding, initialized to tabs for now
-        raw_object.push(padding::TAB);
+        raw_object.push(b'\t');
     }
 
     for character in trimmed_end_half.as_bytes() {
@@ -346,7 +344,7 @@ fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
     if !output.status.success() {
         return Err(io::Error::new(
             io::ErrorKind::Other,
-            "git hash-object failed"
+            "git hash-object failed",
         ));
     }
     assert!(
@@ -365,6 +363,22 @@ fn to_hex_string(hash: &[u8]) -> String {
         .map(|byte| format!("{:02x}", byte))
         .collect::<String>()
 }
+
+// The 256 unique strings of length 8 which contain only ' ' and '\t'.
+// These are computed statically in advance to allow them to be copied quickly.
+static PADDINGS: [[u8; 8]; 256] = {
+    let mut paddings = [[0; 8]; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut j = 0;
+        while j < 8 {
+            paddings[i][j] = if i & (0x80 >> j) == 0 { b' ' } else { b'\t' };
+            j += 1;
+        }
+        i += 1;
+    }
+    paddings
+};
 
 fn run_single_core_benchmark() {
     // Runs a benchmark for performance testing. Using a single core, this does a constant
