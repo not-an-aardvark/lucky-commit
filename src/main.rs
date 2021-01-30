@@ -404,11 +404,12 @@ fn run_single_core_benchmark() {
     assert_eq!(
         None,
         iterate_for_match(&SearchParams {
-            current_commit: "tree 6f4e79123e206448f80ec73b9a53e07eb0784fef\n\
-                                     author Foo Bar <foo@example.com> 1611912738 -0500\n\
-                                     committer Foo Bar <foo@example.com> 1611912738 -0500\n\
-                                     \n\
-                                     Test commit for benchmarking performance changes\n"
+            current_commit: "\
+                    tree 6f4e79123e206448f80ec73b9a53e07eb0784fef\n\
+                    author Foo Bar <foo@example.com> 1611912738 -0500\n\
+                    committer Foo Bar <foo@example.com> 1611912738 -0500\n\
+                    \n\
+                    Test commit for benchmarking performance changes\n"
                 .to_owned(),
             desired_prefix: HashPrefix {
                 data: vec![0; 19],
@@ -426,36 +427,34 @@ mod tests {
     use super::*;
 
     const TEST_COMMIT_WITHOUT_SIGNATURE: &str = "\
-         tree 0123456701234567012345670123456701234567\n\
-         parent 7654321076543210765432107654321076543210\n\
-         author Foo Bár <foo@example.com> 1513980859 -0500\n\
-         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-         \n\
-         Do a thing\n\
-         \n\
-         Makes some changes to the foo feature\n\
-         ";
+        tree 0123456701234567012345670123456701234567\n\
+        parent 7654321076543210765432107654321076543210\n\
+        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+        \n\
+        Do a thing\n\
+        \n\
+        Makes some changes to the foo feature\n";
 
     const TEST_COMMIT_WITH_SIGNATURE: &str = "\
-         tree 0123456701234567012345670123456701234567\n\
-         parent 7654321076543210765432107654321076543210\n\
-         author Foo Bár <foo@example.com> 1513980859 -0500\n\
-         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-         gpgsig -----BEGIN PGP SIGNATURE-----\n\
-         \n\
-         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-         AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-         =AAAA\n\
-         -----END PGP SIGNATURE-----\n\
-         \n\
-         Do a thing\n\
-         \n\
-         Makes some changes to the foo feature\n\
-         ";
+        tree 0123456701234567012345670123456701234567\n\
+        parent 7654321076543210765432107654321076543210\n\
+        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+        gpgsig -----BEGIN PGP SIGNATURE-----\n\
+        \n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+        =AAAA\n\
+        -----END PGP SIGNATURE-----\n\
+        \n\
+        Do a thing\n\
+        \n\
+        Makes some changes to the foo feature\n";
 
     const TEST_COMMIT_WITH_SIGNATURE_AND_MULTIPLE_PARENTS: &str = "\
         tree 0123456701234567012345670123456701234567\n\
@@ -476,8 +475,7 @@ mod tests {
         \n\
         Do a thing\n\
         \n\
-        Makes some changes to the foo feature\n\
-        ";
+        Makes some changes to the foo feature\n";
 
     const TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE: &str = "\
         tree 0123456701234567012345670123456701234567\n\
@@ -488,8 +486,7 @@ mod tests {
         For no particular reason, this commit message looks like a GPG signature.\n\
         gpgsig -----END PGP SIGNATURE-----\n\
         \n\
-        So anyway, that's fun.\n\
-        ";
+        So anyway, that's fun.\n";
 
     const TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL: &str = "\
         tree 0123456701234567012345670123456701234567\n\
@@ -497,8 +494,7 @@ mod tests {
         author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         \n\
-        For no particular reason, the commit author's email has a GPG signature marker.\n\
-        ";
+        For no particular reason, the commit author's email has a GPG signature marker.\n";
 
     #[test]
     fn parse_prefix_empty() {
@@ -624,26 +620,25 @@ mod tests {
             Some(HashMatch {
                 raw_object: format!(
                     "\
-                     commit {}\x00\
-                     tree 0123456701234567012345670123456701234567\n\
-                     parent 7654321076543210765432107654321076543210\n\
-                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig -----BEGIN PGP SIGNATURE-----\n\
-                     \n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     =AAAA\n\
-                     -----END PGP SIGNATURE-----{}{}\n\
-                     \n\
-                     Do a thing\n\
-                     \n\
-                     Makes some changes to the foo feature\n\
-                     ",
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        gpgsig -----BEGIN PGP SIGNATURE-----\n\
+                        \n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        =AAAA\n\
+                        -----END PGP SIGNATURE-----{}{}\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\n",
                     TEST_COMMIT_WITH_SIGNATURE.len() + 40 + 48,
                     iter::repeat(" ").take(40).collect::<String>(),
                     "    \t \t                                         "
@@ -664,17 +659,16 @@ mod tests {
             ProcessedCommit {
                 raw_object: format!(
                     "\
-                     commit {}\x00\
-                     tree 0123456701234567012345670123456701234567\n\
-                     parent 7654321076543210765432107654321076543210\n\
-                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     \n\
-                     Do a thing\n\
-                     \n\
-                     Makes some changes to the foo feature\
-                     {}{}\n\
-                     ",
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\
+                        {}{}\n",
                     TEST_COMMIT_WITHOUT_SIGNATURE.len() + 61 + 48,
                     iter::repeat(" ").take(61).collect::<String>(),
                     iter::repeat("\t").take(48).collect::<String>()
@@ -692,26 +686,25 @@ mod tests {
             ProcessedCommit {
                 raw_object: format!(
                     "\
-                     commit {}\x00\
-                     tree 0123456701234567012345670123456701234567\n\
-                     parent 7654321076543210765432107654321076543210\n\
-                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig -----BEGIN PGP SIGNATURE-----\n\
-                     \n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     =AAAA\n\
-                     -----END PGP SIGNATURE-----{}{}\n\
-                     \n\
-                     Do a thing\n\
-                     \n\
-                     Makes some changes to the foo feature\n\
-                     ",
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        gpgsig -----BEGIN PGP SIGNATURE-----\n\
+                        \n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        =AAAA\n\
+                        -----END PGP SIGNATURE-----{}{}\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\n",
                     TEST_COMMIT_WITH_SIGNATURE.len() + 40 + 48,
                     iter::repeat(" ").take(40).collect::<String>(),
                     iter::repeat("\t").take(48).collect::<String>()
@@ -729,26 +722,25 @@ mod tests {
             ProcessedCommit {
                 raw_object: format!(
                     "\
-                     commit {}\x00\
-                     tree 0123456701234567012345670123456701234567\n\
-                     parent 7654321076543210765432107654321076543210\n\
-                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
-                     \n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     =AAAA\n\
-                     -----END PGP SIGNATURE-----{}{}\n\
-                     \n\
-                     Do a thing\n\
-                     \n\
-                     Makes some changes to the foo feature\n\
-                     ",
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                        \n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        =AAAA\n\
+                        -----END PGP SIGNATURE-----{}{}\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\n",
                     TEST_COMMIT_WITH_SIGNATURE.len() + 32 + 8 + 48,
                     iter::repeat("\t").take(32).collect::<String>(),
                     iter::repeat(" ").take(8).collect::<String>(),
@@ -759,25 +751,24 @@ mod tests {
             },
             process_commit(&format!(
                 "\
-                     tree 0123456701234567012345670123456701234567\n\
-                     parent 7654321076543210765432107654321076543210\n\
-                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
-                     \n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     =AAAA\n\
-                     -----END PGP SIGNATURE-----{}\n\
-                     \n\
-                     Do a thing\n\
-                     \n\
-                     Makes some changes to the foo feature\n\
-                     ",
+                    tree 0123456701234567012345670123456701234567\n\
+                    parent 7654321076543210765432107654321076543210\n\
+                    author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                    gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                    \n\
+                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                    =AAAA\n\
+                    -----END PGP SIGNATURE-----{}\n\
+                    \n\
+                    Do a thing\n\
+                    \n\
+                    Makes some changes to the foo feature\n",
                 iter::repeat("\t").take(32).collect::<String>(),
                 iter::repeat(" ").take(100).collect::<String>()
             ))
@@ -790,27 +781,26 @@ mod tests {
             ProcessedCommit {
                 raw_object: format!(
                     "\
-                     commit {}\x00\
-                     tree 0123456701234567012345670123456701234567\n\
-                     parent 7654321076543210765432107654321076543210\n\
-                     parent 2468246824682468246824682468246824682468\n\
-                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     gpgsig -----BEGIN PGP SIGNATURE-----\n\
-                     \n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                     =AAAA\n\
-                     -----END PGP SIGNATURE-----{}{}\n\
-                     \n\
-                     Do a thing\n\
-                     \n\
-                     Makes some changes to the foo feature\n\
-                     ",
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        parent 2468246824682468246824682468246824682468\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        gpgsig -----BEGIN PGP SIGNATURE-----\n\
+                        \n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                        =AAAA\n\
+                        -----END PGP SIGNATURE-----{}{}\n\
+                        \n\
+                        Do a thing\n\
+                        \n\
+                        Makes some changes to the foo feature\n",
                     TEST_COMMIT_WITH_SIGNATURE_AND_MULTIPLE_PARENTS.len() + 56 + 48,
                     iter::repeat(" ").take(56).collect::<String>(),
                     iter::repeat("\t").take(48).collect::<String>()
@@ -828,17 +818,16 @@ mod tests {
             ProcessedCommit {
                 raw_object: format!(
                     "\
-                     commit {}\x00\
-                     tree 0123456701234567012345670123456701234567\n\
-                     parent 7654321076543210765432107654321076543210\n\
-                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     \n\
-                     For no particular reason, this commit message looks like a GPG signature.\n\
-                     gpgsig -----END PGP SIGNATURE-----\n\
-                     \n\
-                     So anyway, that's fun.{}{}\n\
-                     ",
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        \n\
+                        For no particular reason, this commit message looks like a GPG signature.\n\
+                        gpgsig -----END PGP SIGNATURE-----\n\
+                        \n\
+                        So anyway, that's fun.{}{}\n",
                     TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE.len() + 42 + 48,
                     iter::repeat(" ").take(42).collect::<String>(),
                     iter::repeat("\t").take(48).collect::<String>()
@@ -856,14 +845,13 @@ mod tests {
             ProcessedCommit {
                 raw_object: format!(
                     "\
-                     commit {}\x00\
-                     tree 0123456701234567012345670123456701234567\n\
-                     parent 7654321076543210765432107654321076543210\n\
-                     author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
-                     committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                     \n\
-                     For no particular reason, the commit author's email has a GPG signature marker.{}{}\n\
-                     ",
+                        commit {}\x00\
+                        tree 0123456701234567012345670123456701234567\n\
+                        parent 7654321076543210765432107654321076543210\n\
+                        author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
+                        committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                        \n\
+                        For no particular reason, the commit author's email has a GPG signature marker.{}{}\n",
                     TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL.len() + 7 + 48,
                     iter::repeat(" ").take(7).collect::<String>(),
                     iter::repeat("\t").take(48).collect::<String>()
