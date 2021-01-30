@@ -68,6 +68,10 @@ fn fail_with_message(message: &str) -> ! {
 }
 
 fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
+    if prefix.len() > SHA1_BYTE_LENGTH * 2 {
+        return None;
+    }
+
     let mut data = Vec::new();
     for index in 0..(prefix.len() / 2) {
         match u8::from_str_radix(&prefix[2 * index..2 * index + 2], 16) {
@@ -76,7 +80,7 @@ fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
         }
     }
 
-    let parsed_prefix = HashPrefix {
+    Some(HashPrefix {
         data,
         half_byte: if prefix.len() % 2 == 1 {
             match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
@@ -86,9 +90,7 @@ fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
         } else {
             None
         },
-    };
-
-    Some(parsed_prefix)
+    })
 }
 
 fn run_lucky_commit(desired_prefix: &HashPrefix) {
@@ -561,6 +563,36 @@ mod tests {
     #[test]
     fn parse_prefix_invalid_odd_char() {
         assert_eq!(None, parse_prefix("abcdefg"))
+    }
+
+    #[test]
+    fn parse_prefix_exact_length_match() {
+        assert_eq!(
+            Some(HashPrefix {
+                data: vec![
+                    0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78, 0x12,
+                    0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78
+                ],
+                half_byte: None
+            }),
+            parse_prefix("1234567812345678123456781234567812345678")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_too_long_with_half_byte() {
+        assert_eq!(
+            None,
+            parse_prefix("12345678123456781234567812345678123456781")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_too_many_full_bytes() {
+        assert_eq!(
+            None,
+            parse_prefix("123456781234567812345678123456781234567812")
+        )
     }
 
     #[test]
