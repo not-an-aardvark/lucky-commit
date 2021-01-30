@@ -22,19 +22,10 @@ const SHA1_BYTE_LENGTH: usize = 20;
 // See the comment in `process_commit` for the commit and padding layout.
 const DYNAMIC_PADDING_LENGTH: usize = 48;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 struct HashPrefix {
     data: Vec<u8>,
     half_byte: Option<u8>,
-}
-
-impl Clone for HashPrefix {
-    fn clone(&self) -> Self {
-        HashPrefix {
-            data: self.data.to_owned(),
-            half_byte: self.half_byte.to_owned(),
-        }
-    }
 }
 
 struct SearchParams {
