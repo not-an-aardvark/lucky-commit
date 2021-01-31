@@ -1,4 +1,4 @@
-use sha1::{digest::FixedOutput, Digest, Sha1};
+use sha1::{digest::FixedOutputDirty, Digest, Sha1};
 
 use std::env;
 use std::io;
@@ -197,7 +197,7 @@ fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
 
         let mut sha1_hash = cached_sha1_state.clone();
         sha1_hash.update(&remaining_commit_data);
-        sha1_hash.finalize_into_reset(&mut hash_result);
+        sha1_hash.finalize_into_dirty(&mut hash_result);
 
         if matches_desired_prefix(hash_result.as_ref(), desired_prefix) {
             return Some(HashMatch {
