@@ -100,10 +100,15 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
 
     match find_match(current_commit, desired_prefix) {
         Some(hash_match) => {
-            create_git_commit(&hash_match).expect("Failed to create git commit");
+            create_git_commit(&hash_match)
+                .expect("Found a commit, but failed to write it to the git object database.");
             git_reset_to_hash(&hash_match.hash);
         }
-        None => fail_with_message("Failed to find a match"),
+        None => fail_with_message(
+            "Sorry, failed to find a commit matching the givenprefix despite searching over \
+             281 trillion possible commits. Hopefully you haven't just been sitting here \
+             waiting the whole time.",
+        ),
     }
 }
 
@@ -112,10 +117,18 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
         .args(args)
         .stderr(Stdio::inherit())
         .output()
-        .expect("Failed to run command");
+        .unwrap_or_else(|_| {
+            panic!(
+                "Failed to spawn command `{}` with args `{:?}`",
+                command, args
+            )
+        });
 
     if !output.status.success() {
-        exit(1);
+        panic!(
+            "Command finished with non-zero exit code: {} {:?}",
+            command, args
+        );
     }
 
     output.stdout
@@ -339,14 +352,15 @@ fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
     let output = git_hash_object_child.wait_with_output()?;
 
     if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "git hash-object failed",
-        ));
+        panic!("Found a commit, but failed to write it to the git object database.");
     }
+    let git_hash_output =
+        String::from_utf8(output.stdout).expect("Git produced a hash containing invalid utf8?");
     assert!(
-        String::from_utf8(output.stdout).unwrap().trim_end() == to_hex_string(&search_result.hash),
-        "Found a commit, but git unexpectedly computed a different hash for it"
+        git_hash_output.trim_end() == to_hex_string(&search_result.hash),
+        "Found a commit ({}), but git unexpectedly computed a different hash for it ({})",
+        to_hex_string(&search_result.hash),
+        git_hash_output.trim_end(),
     );
     Ok(())
 }
