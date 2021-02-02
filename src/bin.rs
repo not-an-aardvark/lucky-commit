@@ -1,8 +1,8 @@
 use lucky_commit_lib::{iterate_for_match, HashMatch, HashPrefix, SearchParams, SHA1_BYTE_LENGTH};
+use std::cmp::min;
 use std::env;
 use std::io;
 use std::io::Write;
-use std::ops;
 use std::process::{exit, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -71,8 +71,8 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
             git_reset_to_hash(&hash_match.hash);
         }
         None => fail_with_message(
-            "Sorry, failed to find a commit matching the givenprefix despite searching over \
-             281 trillion possible commits. Hopefully you haven't just been sitting here \
+            "Sorry, failed to find a commit matching the given prefix despite searching hundreds\
+             of trillions of possible commits. Hopefully you haven't just been sitting here \
              waiting the whole time.",
         ),
     }
@@ -101,19 +101,25 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
 }
 
 fn find_match(current_commit: &[u8], desired_prefix: &HashPrefix) -> Option<HashMatch> {
-    let num_threads = num_cpus::get_physical();
     let (shared_sender, receiver) = mpsc::channel();
-    let counter_ranges = split_range(0, 1u64 << 48, num_threads);
+    let num_threads = min(num_cpus::get_physical(), 65535) as u64;
+    let workload_per_thread = 1 << 48;
 
-    for counter_range in counter_ranges {
-        spawn_hash_searcher(
-            shared_sender.clone(),
-            SearchParams {
-                current_commit: current_commit.to_vec(),
-                desired_prefix: desired_prefix.clone(),
-                counter_range: counter_range.clone(),
-            },
-        );
+    for thread_index in 0..num_threads {
+        let search_params = SearchParams {
+            current_commit: current_commit.to_vec(),
+            desired_prefix: desired_prefix.clone(),
+            counter_range: (thread_index * workload_per_thread)
+                ..((thread_index + 1) * workload_per_thread),
+        };
+        let result_sender = shared_sender.clone();
+        thread::spawn(move || {
+            /*
+             * If an error occurs when sending, then the receiver has already received
+             * a match from another thread, so ignore the error.
+             */
+            let _ = result_sender.send(iterate_for_match(&search_params));
+        });
     }
 
     for _ in 0..num_threads {
@@ -124,29 +130,6 @@ fn find_match(current_commit: &[u8], desired_prefix: &HashPrefix) -> Option<Hash
     }
 
     None
-}
-
-fn spawn_hash_searcher(result_sender: mpsc::Sender<Option<HashMatch>>, params: SearchParams) {
-    thread::spawn(move || {
-        /*
-         * If an error occurs when sending, then the receiver has already received
-         * a match from another thread, so ignore the error.
-         */
-        let _ = result_sender.send(iterate_for_match(&params));
-    });
-}
-
-fn split_range(min: u64, max: u64, num_segments: usize) -> Vec<ops::Range<u64>> {
-    let segment_size = (max - min) / (num_segments as u64);
-
-    let mut segments = Vec::new();
-    let mut last_range_end = 0;
-    for _ in 0..num_segments {
-        segments.push(last_range_end..last_range_end + segment_size);
-        last_range_end += segment_size;
-    }
-
-    segments
 }
 
 fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
@@ -336,46 +319,6 @@ mod tests {
             None,
             parse_prefix("123456781234567812345678123456781234567812")
         )
-    }
-
-    #[test]
-    fn split_range_u32_one_segment() {
-        assert_eq!(vec![0..1u64 << 32], split_range(0, 1u64 << 32, 1));
-    }
-
-    #[test]
-    fn split_range_u32_multiple_segments() {
-        let range_max = 1u64 << 32;
-        assert_eq!(
-            vec![
-                0..range_max / 5,
-                range_max / 5..2 * range_max / 5,
-                2 * range_max / 5..3 * range_max / 5,
-                3 * range_max / 5..4 * range_max / 5,
-                4 * range_max / 5..range_max - 1
-            ],
-            split_range(0, range_max, 5)
-        );
-    }
-
-    #[test]
-    fn split_range_u64_one_segment() {
-        assert_eq!(vec![0..u64::MAX], split_range(0, u64::MAX, 1));
-    }
-
-    #[test]
-    fn split_range_u64_multiple_segments() {
-        let range_max = u64::MAX;
-        assert_eq!(
-            vec![
-                0..range_max / 5,
-                range_max / 5..range_max / 5 * 2,
-                range_max / 5 * 2..range_max / 5 * 3,
-                range_max / 5 * 3..range_max / 5 * 4,
-                range_max / 5 * 4..range_max
-            ],
-            split_range(0, range_max, 5)
-        );
     }
 
     #[test]
