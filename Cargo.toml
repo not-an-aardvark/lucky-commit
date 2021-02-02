@@ -10,4 +10,4 @@ license = "MIT"
 [dependencies]
 
 num_cpus = "1.0"
-"sha-1" = "0.9"
+"sha-1" = { version = "0.9", features = ["std", "asm"] }
