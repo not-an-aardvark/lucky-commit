@@ -1,5 +1,4 @@
 use lucky_commit_lib::{iterate_for_match, parse_prefix, HashMatch, HashPrefix, SearchParams};
-use std::cmp::min;
 use std::env;
 use std::io;
 use std::io::Write;
@@ -75,8 +74,8 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
 
 fn find_match(current_commit: &[u8], desired_prefix: &HashPrefix) -> Option<HashMatch> {
     let (shared_sender, receiver) = mpsc::channel();
-    let num_threads = min(num_cpus::get_physical(), 65535) as u64;
-    let workload_per_thread = 1 << 48;
+    let num_threads = num_cpus::get_physical() as u64;
+    let workload_per_thread = (1 << 48) / num_threads;
 
     for thread_index in 0..num_threads {
         let search_params = SearchParams {
