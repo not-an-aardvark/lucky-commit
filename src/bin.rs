@@ -62,11 +62,9 @@ fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
 }
 
 fn run_lucky_commit(desired_prefix: &HashPrefix) {
-    let current_commit_bytes = run_command("git", &["cat-file", "commit", "HEAD"]);
-    let current_commit =
-        &String::from_utf8(current_commit_bytes).expect("Git commit contains invalid utf8");
+    let current_commit = run_command("git", &["cat-file", "commit", "HEAD"]);
 
-    match find_match(current_commit, desired_prefix) {
+    match find_match(&current_commit, desired_prefix) {
         Some(hash_match) => {
             create_git_commit(&hash_match)
                 .expect("Found a commit, but failed to write it to the git object database.");
@@ -102,7 +100,7 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
     output.stdout
 }
 
-fn find_match(current_commit: &str, desired_prefix: &HashPrefix) -> Option<HashMatch> {
+fn find_match(current_commit: &[u8], desired_prefix: &HashPrefix) -> Option<HashMatch> {
     let num_threads = num_cpus::get_physical();
     let (shared_sender, receiver) = mpsc::channel();
     let counter_ranges = split_range(0, 1u64 << 48, num_threads);
@@ -111,7 +109,7 @@ fn find_match(current_commit: &str, desired_prefix: &HashPrefix) -> Option<HashM
         spawn_hash_searcher(
             shared_sender.clone(),
             SearchParams {
-                current_commit: current_commit.to_owned(),
+                current_commit: current_commit.to_vec(),
                 desired_prefix: desired_prefix.clone(),
                 counter_range: counter_range.clone(),
             },
@@ -225,13 +223,13 @@ fn run_single_core_benchmark() {
     assert_eq!(
         None,
         iterate_for_match(&SearchParams {
-            current_commit: "\
+            current_commit: b"\
                     tree 6f4e79123e206448f80ec73b9a53e07eb0784fef\n\
                     author Foo Bar <foo@example.com> 1611912738 -0500\n\
                     committer Foo Bar <foo@example.com> 1611912738 -0500\n\
                     \n\
                     Test commit for benchmarking performance changes\n"
-                .to_owned(),
+                .to_vec(),
             desired_prefix: HashPrefix {
                 data: vec![0; 19],
                 half_byte: Some(0x0)

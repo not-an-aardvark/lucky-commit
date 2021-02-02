@@ -6,19 +6,20 @@ pub const SHA1_BYTE_LENGTH: usize = 20;
 // See the comment in `process_commit` for the commit and padding layout.
 const DYNAMIC_PADDING_LENGTH: usize = 48;
 
+/// Defines a target prefix for a commit hash.
 #[derive(Debug, PartialEq, Clone)]
 pub struct HashPrefix {
-    //
+    // The full bytes of the prefix.
     pub data: Vec<u8>,
 
     // If the desired prefix has an odd number of characters when represented
     // as a hex string, the last character should be specified in `half_byte`.
-    // Only the most significant byte is used.
+    // Only the most significant four bits of `half_byte` are used.
     pub half_byte: Option<u8>,
 }
 
 pub struct SearchParams {
-    pub current_commit: String,
+    pub current_commit: Vec<u8>,
     pub desired_prefix: HashPrefix,
     pub counter_range: ops::Range<u64>,
 }
@@ -91,10 +92,10 @@ pub fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     None
 }
 
-fn process_commit(original_commit: &str) -> ProcessedCommit {
+fn process_commit(original_commit: &[u8]) -> ProcessedCommit {
     // The fully padded data that gets hashed is the concatenation of all the following:
     // * "commit " + length + "\x00", where `length` is the base-10 representation of the length
-    //    of everything that follows the null character.
+    //    of everything that follows the null character. This is part of git's raw commit format.
     // * The original commit object, containing everything up to the point where padding should be
     //   added.
     // * Up to 63 space characters, as static padding. This is inserted so that the dynamic padding
@@ -118,41 +119,43 @@ fn process_commit(original_commit: &str) -> ProcessedCommit {
 
     const DYNAMIC_PADDING_ALIGNMENT: usize = 64;
     let commit_split_index = get_commit_split_index(original_commit);
-    let trimmable_paddings: &[_] = &[' ', '\t'];
-    let trimmed_end_half =
-        original_commit[commit_split_index..].trim_start_matches(trimmable_paddings);
-    let length_before_static_padding =
-        format!("commit {}\x00", commit_split_index).len() + commit_split_index;
+
+    // If the commit message already has spaces or tabs where we're putting padding, the most
+    // likely explanation is that the user has run lucky-commit on this commit before. To prevent
+    // commits from repeatedly growing after lucky-commit is run on them, omit the old padding
+    // rather than piling onto it.
+    let replaceable_padding_size = original_commit[commit_split_index..]
+        .iter()
+        .take_while(|byte| **byte == b' ' || **byte == b'\t')
+        .count();
+    let approximate_length_before_static_padding =
+        format!("commit {}\x00", original_commit.len()).len() + commit_split_index;
+
+    // Use enough static padding to pad to a multiple of 64
     let static_padding_length = (DYNAMIC_PADDING_ALIGNMENT
-        - (length_before_static_padding % DYNAMIC_PADDING_ALIGNMENT))
+        - (approximate_length_before_static_padding % DYNAMIC_PADDING_ALIGNMENT))
         % DYNAMIC_PADDING_ALIGNMENT;
 
     let mut raw_object: Vec<u8> = format!(
         "commit {}\x00",
-        commit_split_index
+        original_commit.len() - replaceable_padding_size
             + static_padding_length
             + DYNAMIC_PADDING_LENGTH
-            + trimmed_end_half.len()
     )
     .into_bytes();
 
-    let dynamic_padding_start_index = raw_object.len() + commit_split_index + static_padding_length;
-    assert!(dynamic_padding_start_index % DYNAMIC_PADDING_ALIGNMENT <= 2);
-
-    for character in original_commit[..commit_split_index].as_bytes() {
-        // Add the first half of the original commit
-        raw_object.push(*character);
-    }
+    raw_object.extend(&original_commit[..commit_split_index]);
 
     // Add static padding
     raw_object.resize(raw_object.len() + static_padding_length, b' ');
+
+    let dynamic_padding_start_index = raw_object.len();
+    assert!(dynamic_padding_start_index % DYNAMIC_PADDING_ALIGNMENT <= 2);
+
     // Add dynamic padding, initialized to tabs for now
     raw_object.resize(raw_object.len() + DYNAMIC_PADDING_LENGTH, b'\t');
 
-    for character in trimmed_end_half.as_bytes() {
-        // Add the rest of the commit
-        raw_object.push(*character);
-    }
+    raw_object.extend(&original_commit[commit_split_index + replaceable_padding_size..]);
 
     ProcessedCommit {
         raw_object,
@@ -160,7 +163,7 @@ fn process_commit(original_commit: &str) -> ProcessedCommit {
     }
 }
 
-fn get_commit_split_index(commit: &str) -> usize {
+fn get_commit_split_index(commit: &[u8]) -> usize {
     /*
      * If the commit has a GPG signature (detected by the presence of "-----END PGP SIGNATURE-----"
      * after a line that starts with "gpgsig "), then add the padding whitespace immediately after
@@ -172,11 +175,11 @@ fn get_commit_split_index(commit: &str) -> usize {
      * the signature invalid.
      */
     let mut found_gpgsig_line = false;
-    const SIGNATURE_MARKER: &str = "-----END PGP SIGNATURE-----";
-    for (index, _character) in commit.char_indices() {
-        if commit[index..].starts_with("\ngpgsig ") {
+    const SIGNATURE_MARKER: &[u8] = b"-----END PGP SIGNATURE-----";
+    for index in 0..commit.len() {
+        if commit[index..].starts_with(b"\ngpgsig ") {
             found_gpgsig_line = true;
-        } else if !found_gpgsig_line && commit[index..].starts_with("\n\n") {
+        } else if !found_gpgsig_line && commit[index..].starts_with(b"\n\n") {
             // We've reached the commit message and no GPG signature has been found.
             // Add the padding to the end of the commit.
             break;
@@ -185,7 +188,15 @@ fn get_commit_split_index(commit: &str) -> usize {
         }
     }
 
-    commit.trim_end().len()
+    // If there's no GPG signature, trim the end of the commit and take the length.
+    // This ensures that the commit will still have a trailing newline after padding is added, and
+    // that any existing padding appears after the split index.
+    commit.len()
+        - commit
+            .iter()
+            .rev()
+            .take_while(|byte| **byte == b' ' || **byte == b'\t' || **byte == b'\n')
+            .count()
 }
 
 fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) -> bool {
@@ -202,20 +213,20 @@ mod tests {
 
     use super::*;
 
-    const TEST_COMMIT_WITHOUT_SIGNATURE: &str = "\
+    const TEST_COMMIT_WITHOUT_SIGNATURE: &[u8] = b"\
         tree 0123456701234567012345670123456701234567\n\
         parent 7654321076543210765432107654321076543210\n\
-        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+        author Foo B\xc3\xa1r <foo@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         \n\
         Do a thing\n\
         \n\
         Makes some changes to the foo feature\n";
 
-    const TEST_COMMIT_WITH_SIGNATURE: &str = "\
+    const TEST_COMMIT_WITH_SIGNATURE: &[u8] = b"\
         tree 0123456701234567012345670123456701234567\n\
         parent 7654321076543210765432107654321076543210\n\
-        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+        author Foo B\xc3\xa1r <foo@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         gpgsig -----BEGIN PGP SIGNATURE-----\n\
         \n\
@@ -232,11 +243,11 @@ mod tests {
         \n\
         Makes some changes to the foo feature\n";
 
-    const TEST_COMMIT_WITH_SIGNATURE_AND_MULTIPLE_PARENTS: &str = "\
+    const TEST_COMMIT_WITH_SIGNATURE_AND_MULTIPLE_PARENTS: &[u8] = b"\
         tree 0123456701234567012345670123456701234567\n\
         parent 7654321076543210765432107654321076543210\n\
         parent 2468246824682468246824682468246824682468\n\
-        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+        author Foo B\xc3\xa1r <foo@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         gpgsig -----BEGIN PGP SIGNATURE-----\n\
         \n\
@@ -253,10 +264,10 @@ mod tests {
         \n\
         Makes some changes to the foo feature\n";
 
-    const TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE: &str = "\
+    const TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE: &[u8] = b"\
         tree 0123456701234567012345670123456701234567\n\
         parent 7654321076543210765432107654321076543210\n\
-        author Foo Bár <foo@example.com> 1513980859 -0500\n\
+        author Foo B\xc3\xa1r <foo@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         \n\
         For no particular reason, this commit message looks like a GPG signature.\n\
@@ -264,10 +275,10 @@ mod tests {
         \n\
         So anyway, that's fun.\n";
 
-    const TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL: &str = "\
+    const TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL: &[u8] = b"\
         tree 0123456701234567012345670123456701234567\n\
         parent 7654321076543210765432107654321076543210\n\
-        author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
+        author Foo B\xc3\xa1r <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
         committer Baz Qux <baz@example.com> 1513980898 -0500\n\
         \n\
         For no particular reason, the commit author's email has a GPG signature marker.\n";
@@ -430,8 +441,9 @@ mod tests {
                 .into_bytes(),
                 dynamic_padding_start_index: 704
             },
-            process_commit(&format!(
-                "\
+            process_commit(
+                &format!(
+                    "\
                     tree 0123456701234567012345670123456701234567\n\
                     parent 7654321076543210765432107654321076543210\n\
                     author Foo Bár <foo@example.com> 1513980859 -0500\n\
@@ -450,9 +462,11 @@ mod tests {
                     Do a thing\n\
                     \n\
                     Makes some changes to the foo feature\n",
-                iter::repeat("\t").take(32).collect::<String>(),
-                iter::repeat(" ").take(100).collect::<String>()
-            ))
+                    iter::repeat("\t").take(32).collect::<String>(),
+                    iter::repeat(" ").take(100).collect::<String>()
+                )
+                .into_bytes()
+            )
         )
     }
 
