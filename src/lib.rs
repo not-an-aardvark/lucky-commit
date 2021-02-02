@@ -1,7 +1,7 @@
 use sha1::{digest::FixedOutputDirty, Digest, Sha1};
 use std::ops;
 
-pub const SHA1_BYTE_LENGTH: usize = 20;
+const SHA1_BYTE_LENGTH: usize = 20;
 
 // See the comment in `process_commit` for the commit and padding layout.
 const DYNAMIC_PADDING_LENGTH: usize = 48;
@@ -205,6 +205,32 @@ fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) ->
             Some(half_byte) => (hash[prefix.data.len()] & 0xf0) == half_byte,
             None => true,
         }
+}
+
+pub fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
+    if prefix.len() > SHA1_BYTE_LENGTH * 2 {
+        return None;
+    }
+
+    let mut data = Vec::new();
+    for index in 0..(prefix.len() / 2) {
+        match u8::from_str_radix(&prefix[2 * index..2 * index + 2], 16) {
+            Ok(value) => data.push(value),
+            Err(_) => return None,
+        }
+    }
+
+    Some(HashPrefix {
+        data,
+        half_byte: if prefix.len() % 2 == 1 {
+            match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
+                Ok(value) => Some(value << 4),
+                Err(_) => return None,
+            }
+        } else {
+            None
+        },
+    })
 }
 
 #[cfg(test)]
@@ -633,5 +659,100 @@ mod tests {
                 half_byte: Some(0x40)
             }
         ))
+    }
+
+    #[test]
+    fn parse_prefix_empty() {
+        assert_eq!(
+            Some(HashPrefix {
+                data: Vec::new(),
+                half_byte: None
+            }),
+            parse_prefix("")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_single_char() {
+        assert_eq!(
+            Some(HashPrefix {
+                data: Vec::new(),
+                half_byte: Some(0xa0)
+            }),
+            parse_prefix("a")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_even_chars() {
+        assert_eq!(
+            Some(HashPrefix {
+                data: vec![0xab, 0xcd, 0xef],
+                half_byte: None
+            }),
+            parse_prefix("abcdef")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_odd_chars() {
+        assert_eq!(
+            Some(HashPrefix {
+                data: vec![0xab, 0xcd, 0xef],
+                half_byte: Some(0x50)
+            }),
+            parse_prefix("abcdef5")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_capital_letters() {
+        assert_eq!(
+            Some(HashPrefix {
+                data: vec![0xab, 0xcd, 0xef],
+                half_byte: Some(0xb0)
+            }),
+            parse_prefix("ABCDEFB")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_invalid_even_chars() {
+        assert_eq!(None, parse_prefix("abcdgeb"))
+    }
+
+    #[test]
+    fn parse_prefix_invalid_odd_char() {
+        assert_eq!(None, parse_prefix("abcdefg"))
+    }
+
+    #[test]
+    fn parse_prefix_exact_length_match() {
+        assert_eq!(
+            Some(HashPrefix {
+                data: vec![
+                    0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78, 0x12,
+                    0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78
+                ],
+                half_byte: None
+            }),
+            parse_prefix("1234567812345678123456781234567812345678")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_too_long_with_half_byte() {
+        assert_eq!(
+            None,
+            parse_prefix("12345678123456781234567812345678123456781")
+        )
+    }
+
+    #[test]
+    fn parse_prefix_too_many_full_bytes() {
+        assert_eq!(
+            None,
+            parse_prefix("123456781234567812345678123456781234567812")
+        )
     }
 }

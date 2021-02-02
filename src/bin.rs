@@ -1,4 +1,4 @@
-use lucky_commit_lib::{iterate_for_match, HashMatch, HashPrefix, SearchParams, SHA1_BYTE_LENGTH};
+use lucky_commit_lib::{iterate_for_match, parse_prefix, HashMatch, HashPrefix, SearchParams};
 use std::cmp::min;
 use std::env;
 use std::io;
@@ -6,7 +6,6 @@ use std::io::Write;
 use std::process::{exit, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::u8;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -35,32 +34,6 @@ fn fail_with_message(message: &str) -> ! {
     exit(1)
 }
 
-fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
-    if prefix.len() > SHA1_BYTE_LENGTH * 2 {
-        return None;
-    }
-
-    let mut data = Vec::new();
-    for index in 0..(prefix.len() / 2) {
-        match u8::from_str_radix(&prefix[2 * index..2 * index + 2], 16) {
-            Ok(value) => data.push(value),
-            Err(_) => return None,
-        }
-    }
-
-    Some(HashPrefix {
-        data,
-        half_byte: if prefix.len() % 2 == 1 {
-            match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
-                Ok(value) => Some(value << 4),
-                Err(_) => return None,
-            }
-        } else {
-            None
-        },
-    })
-}
-
 fn run_lucky_commit(desired_prefix: &HashPrefix) {
     let current_commit = run_command("git", &["cat-file", "commit", "HEAD"]);
 
@@ -68,7 +41,7 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
         Some(hash_match) => {
             create_git_commit(&hash_match)
                 .expect("Found a commit, but failed to write it to the git object database.");
-            git_reset_to_hash(&hash_match.hash);
+            run_command("git", &["reset", &to_hex_string(&hash_match.hash)]);
         }
         None => fail_with_message(
             "Sorry, failed to find a commit matching the given prefix despite searching hundreds\
@@ -169,10 +142,6 @@ fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
     Ok(())
 }
 
-fn git_reset_to_hash(hash: &[u8; SHA1_BYTE_LENGTH]) {
-    run_command("git", &["reset", &to_hex_string(hash)]);
-}
-
 fn to_hex_string(hash: &[u8]) -> String {
     hash.iter()
         .map(|byte| format!("{:02x}", *byte))
@@ -220,114 +189,4 @@ fn run_single_core_benchmark() {
             counter_range: 1..((1 << 28) / num_cpus::get_physical() as u64)
         })
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_prefix_empty() {
-        assert_eq!(
-            Some(HashPrefix {
-                data: Vec::new(),
-                half_byte: None
-            }),
-            parse_prefix("")
-        )
-    }
-
-    #[test]
-    fn parse_prefix_single_char() {
-        assert_eq!(
-            Some(HashPrefix {
-                data: Vec::new(),
-                half_byte: Some(0xa0)
-            }),
-            parse_prefix("a")
-        )
-    }
-
-    #[test]
-    fn parse_prefix_even_chars() {
-        assert_eq!(
-            Some(HashPrefix {
-                data: vec![0xab, 0xcd, 0xef],
-                half_byte: None
-            }),
-            parse_prefix("abcdef")
-        )
-    }
-
-    #[test]
-    fn parse_prefix_odd_chars() {
-        assert_eq!(
-            Some(HashPrefix {
-                data: vec![0xab, 0xcd, 0xef],
-                half_byte: Some(0x50)
-            }),
-            parse_prefix("abcdef5")
-        )
-    }
-
-    #[test]
-    fn parse_prefix_capital_letters() {
-        assert_eq!(
-            Some(HashPrefix {
-                data: vec![0xab, 0xcd, 0xef],
-                half_byte: Some(0xb0)
-            }),
-            parse_prefix("ABCDEFB")
-        )
-    }
-
-    #[test]
-    fn parse_prefix_invalid_even_chars() {
-        assert_eq!(None, parse_prefix("abcdgeb"))
-    }
-
-    #[test]
-    fn parse_prefix_invalid_odd_char() {
-        assert_eq!(None, parse_prefix("abcdefg"))
-    }
-
-    #[test]
-    fn parse_prefix_exact_length_match() {
-        assert_eq!(
-            Some(HashPrefix {
-                data: vec![
-                    0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78, 0x12,
-                    0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78
-                ],
-                half_byte: None
-            }),
-            parse_prefix("1234567812345678123456781234567812345678")
-        )
-    }
-
-    #[test]
-    fn parse_prefix_too_long_with_half_byte() {
-        assert_eq!(
-            None,
-            parse_prefix("12345678123456781234567812345678123456781")
-        )
-    }
-
-    #[test]
-    fn parse_prefix_too_many_full_bytes() {
-        assert_eq!(
-            None,
-            parse_prefix("123456781234567812345678123456781234567812")
-        )
-    }
-
-    #[test]
-    fn to_hex_string_basic() {
-        assert_eq!("00", to_hex_string(&[0]));
-    }
-
-    #[test]
-    fn to_hex_string_multichar() {
-        assert_eq!("00ff14", to_hex_string(&[0, 255, 20]));
-    }
 }
