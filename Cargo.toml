@@ -7,6 +7,14 @@ description = "Make your git commits lucky!"
 repository = "https://github.com/not-an-aardvark/lucky-commit"
 license = "MIT"
 
+[lib]
+name = "lucky_commit_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lucky_commit"
+path = "src/bin.rs"
+
 [dependencies]
 
 num_cpus = "1.0"
