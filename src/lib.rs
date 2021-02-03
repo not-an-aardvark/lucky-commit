@@ -26,13 +26,14 @@ pub struct SearchParams {
 
 #[derive(Debug, PartialEq)]
 pub struct HashMatch {
-    pub raw_object: Vec<u8>,
+    pub commit: Vec<u8>,
     pub hash: [u8; SHA1_BYTE_LENGTH],
 }
 
 #[derive(Debug, PartialEq)]
 struct ProcessedCommit {
-    raw_object: Vec<u8>,
+    header: Vec<u8>,
+    commit: Vec<u8>,
     dynamic_padding_start_index: usize,
 }
 
@@ -53,8 +54,11 @@ static PADDINGS: [[u8; 8]; 256] = {
 };
 
 pub fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
-    let desired_prefix = &params.desired_prefix;
-    let mut processed_commit = process_commit(&params.current_commit);
+    let ProcessedCommit {
+        header,
+        mut commit,
+        dynamic_padding_start_index,
+    } = process_commit(&params.current_commit);
 
     // SHA1 works by splitting the input data into 64-byte blocks. Each 64-byte block
     // can be processed in sequence. Since we're adding whitespace near the end of a
@@ -62,10 +66,10 @@ pub fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
     // Instead of reprocessing those blocks every time, we can just cache the SHA1 state
     // after processing those blocks, and only process the new padding each time.
     let cached_sha1_state = Sha1::new()
-        .chain(&processed_commit.raw_object[0..processed_commit.dynamic_padding_start_index]);
+        .chain(&header)
+        .chain(&commit[0..dynamic_padding_start_index]);
 
-    let remaining_commit_data =
-        &mut processed_commit.raw_object[processed_commit.dynamic_padding_start_index..];
+    let remaining_commit_data = &mut commit[dynamic_padding_start_index..];
     let mut hash_result = Default::default();
 
     for counter in params.counter_range.clone() {
@@ -81,9 +85,9 @@ pub fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
         sha1_hash.update(&remaining_commit_data);
         sha1_hash.finalize_into_dirty(&mut hash_result);
 
-        if matches_desired_prefix(hash_result.as_ref(), desired_prefix) {
+        if matches_desired_prefix(hash_result.as_ref(), &params.desired_prefix) {
             return Some(HashMatch {
-                raw_object: processed_commit.raw_object,
+                commit,
                 hash: hash_result.into(),
             });
         }
@@ -136,29 +140,28 @@ fn process_commit(original_commit: &[u8]) -> ProcessedCommit {
         - (approximate_length_before_static_padding % DYNAMIC_PADDING_ALIGNMENT))
         % DYNAMIC_PADDING_ALIGNMENT;
 
-    let mut raw_object: Vec<u8> = format!(
-        "commit {}\x00",
-        original_commit.len() - replaceable_padding_size
-            + static_padding_length
-            + DYNAMIC_PADDING_LENGTH
-    )
-    .into_bytes();
+    let commit_length = original_commit.len() - replaceable_padding_size
+        + static_padding_length
+        + DYNAMIC_PADDING_LENGTH;
+    let header = format!("commit {}\x00", commit_length).into_bytes();
 
-    raw_object.extend(&original_commit[..commit_split_index]);
+    let mut commit = Vec::with_capacity(commit_length);
+    commit.extend(&original_commit[..commit_split_index]);
 
     // Add static padding
-    raw_object.resize(raw_object.len() + static_padding_length, b' ');
+    commit.resize(commit.len() + static_padding_length, b' ');
 
-    let dynamic_padding_start_index = raw_object.len();
-    assert!(dynamic_padding_start_index % DYNAMIC_PADDING_ALIGNMENT <= 2);
+    let dynamic_padding_start_index = commit.len();
+    assert!((dynamic_padding_start_index + header.len()) % DYNAMIC_PADDING_ALIGNMENT <= 1);
 
     // Add dynamic padding, initialized to tabs for now
-    raw_object.resize(raw_object.len() + DYNAMIC_PADDING_LENGTH, b'\t');
+    commit.resize(commit.len() + DYNAMIC_PADDING_LENGTH, b'\t');
 
-    raw_object.extend(&original_commit[commit_split_index + replaceable_padding_size..]);
+    commit.extend(&original_commit[commit_split_index + replaceable_padding_size..]);
 
     ProcessedCommit {
-        raw_object,
+        header,
+        commit,
         dynamic_padding_start_index,
     }
 }

@@ -43,7 +43,7 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
             run_command("git", &["reset", &to_hex_string(&hash_match.hash)]);
         }
         None => fail_with_message(
-            "Sorry, failed to find a commit matching the given prefix despite searching hundreds\
+            "Sorry, failed to find a commit matching the given prefix despite searching hundreds \
              of trillions of possible commits. Hopefully you haven't just been sitting here \
              waiting the whole time.",
         ),
@@ -105,14 +105,6 @@ fn find_match(current_commit: &[u8], desired_prefix: &HashPrefix) -> Option<Hash
 }
 
 fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
-    assert!(&search_result.raw_object[0..7] == b"commit ");
-    let commit_start_index = search_result
-        .raw_object
-        .iter()
-        .position(|byte| *byte == 0)
-        .expect("No null character found in constructed raw git object?")
-        + 1;
-
     let mut git_hash_object_child = Command::new("git")
         .args(&["hash-object", "-t", "commit", "-w", "--stdin"])
         .stdin(Stdio::piped())
@@ -124,7 +116,7 @@ fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
         .stdin
         .as_mut()
         .unwrap()
-        .write_all(&search_result.raw_object[commit_start_index..])?;
+        .write_all(&search_result.commit)?;
     let output = git_hash_object_child.wait_with_output()?;
 
     if !output.status.success() {
@@ -185,7 +177,7 @@ fn run_single_core_benchmark() {
                 data: vec![0; 19],
                 half_byte: Some(0x0)
             },
-            counter_range: 1..((1 << 28) / num_cpus::get_physical() as u64)
+            counter_range: 0..((1 << 28) / num_cpus::get_physical() as u64)
         })
     );
 }
