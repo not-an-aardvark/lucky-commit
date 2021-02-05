@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install latest stable
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+    - name: Build
+      run: cargo build --verbose
+    - name: Format
+      run: cargo fmt -- --check
+    - name: Lint
+      run: cargo clippy
+    - name: Run tests
+      run: cargo test --verbose
+    - name: Run benchmark
+      run: 'cargo build --release && time target/release/lucky_commit --benchmark'
