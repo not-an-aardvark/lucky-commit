@@ -63,7 +63,7 @@ checksum = "1cca32fa0182e8c0989459524dc356b8f2b5c10f1b9eb521b7d182c03cf8c5ff"
 
 [[package]]
 name = "lucky_commit"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "num_cpus",
  "sha-1",
