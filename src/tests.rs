@@ -73,30 +73,23 @@ const TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL: &[u8] = b"\
     For no particular reason, the commit author's email has a GPG signature marker.\n";
 
 #[test]
-fn iterate_for_match_failure() {
-    let search_params = SearchParams {
-        current_commit: TEST_COMMIT_WITH_SIGNATURE.to_owned(),
-        desired_prefix: HashPrefix {
-            data: vec![1, 2, 3],
-            half_byte: Some(0x40),
-        },
-        counter_range: 1..100,
-    };
-
-    assert_eq!(None, iterate_for_match(&search_params))
+fn search_failure() {
+    assert_eq!(
+        None,
+        HashSearchWorker::new(
+            TEST_COMMIT_WITH_SIGNATURE,
+            HashPrefix {
+                data: vec![1, 2, 3],
+                half_byte: Some(0x40),
+            }
+        )
+        .with_capped_search_space(100)
+        .search()
+    );
 }
 
 #[test]
-fn search_for_match_success() {
-    let search_params = SearchParams {
-        current_commit: TEST_COMMIT_WITH_SIGNATURE.to_owned(),
-        desired_prefix: HashPrefix {
-            data: vec![73, 174],
-            half_byte: Some(0x80),
-        },
-        counter_range: 1..100,
-    };
-
+fn search_success() {
     assert_eq!(
         Some(HashMatch {
             commit: format!(
@@ -128,7 +121,45 @@ fn search_for_match_success() {
                 65, 184
             ]
         }),
-        iterate_for_match(&search_params)
+        HashSearchWorker::new(
+            TEST_COMMIT_WITH_SIGNATURE,
+            HashPrefix {
+                data: vec![73, 174],
+                half_byte: Some(0x80),
+            },
+        )
+        .with_capped_search_space(100)
+        .search()
+    );
+}
+
+#[test]
+fn split_search_space_uneven() {
+    assert_eq!(
+        vec![
+            HashSearchWorker {
+                processed_commit: process_commit(TEST_COMMIT_WITH_SIGNATURE),
+                desired_prefix: Default::default(),
+                search_space: 0..33,
+            },
+            HashSearchWorker {
+                processed_commit: process_commit(TEST_COMMIT_WITH_SIGNATURE),
+                desired_prefix: Default::default(),
+                search_space: 33..66,
+            },
+            HashSearchWorker {
+                processed_commit: process_commit(TEST_COMMIT_WITH_SIGNATURE),
+                desired_prefix: Default::default(),
+                search_space: 66..100,
+            }
+        ],
+        HashSearchWorker {
+            processed_commit: process_commit(TEST_COMMIT_WITH_SIGNATURE),
+            desired_prefix: Default::default(),
+            search_space: 0..100,
+        }
+        .split_search_space(3)
+        .collect::<Vec<_>>()
     )
 }
 
@@ -358,79 +389,65 @@ fn process_commit_with_gpg_stuff_in_email() {
 
 #[test]
 fn matches_desired_prefix_empty() {
-    assert!(matches_desired_prefix(
-        &[0; SHA1_BYTE_LENGTH],
-        &HashPrefix {
-            data: Vec::new(),
-            half_byte: None
-        }
-    ))
+    assert!(HashPrefix {
+        data: Vec::new(),
+        half_byte: None
+    }
+    .matches(&[0; SHA1_BYTE_LENGTH]))
 }
 
 #[test]
 fn matches_desired_prefix_single_half() {
-    assert!(matches_desired_prefix(
-        &[0x1e; SHA1_BYTE_LENGTH],
-        &HashPrefix {
-            data: Vec::new(),
-            half_byte: Some(0x10)
-        }
-    ))
+    assert!(HashPrefix {
+        data: Vec::new(),
+        half_byte: Some(0x10)
+    }
+    .matches(&[0x1e; SHA1_BYTE_LENGTH]))
 }
 
 #[test]
 fn matches_desired_prefix_single_half_mismatch() {
-    assert!(!matches_desired_prefix(
-        &[0x21; SHA1_BYTE_LENGTH],
-        &HashPrefix {
-            data: Vec::new(),
-            half_byte: Some(0x10)
-        }
-    ))
+    assert!(!HashPrefix {
+        data: Vec::new(),
+        half_byte: Some(0x10)
+    }
+    .matches(&[0x21; SHA1_BYTE_LENGTH]))
 }
 
 #[test]
 fn matches_desired_prefix_data_without_half() {
-    assert!(matches_desired_prefix(
-        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-        &HashPrefix {
-            data: vec![1, 2, 3],
-            half_byte: None
-        }
-    ))
+    assert!(HashPrefix {
+        data: vec![1, 2, 3],
+        half_byte: None
+    }
+    .matches(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
 }
 
 #[test]
 fn matches_desired_prefix_matching_data_and_half() {
-    assert!(matches_desired_prefix(
-        &[1, 2, 3, 0x4f, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-        &HashPrefix {
-            data: vec![1, 2, 3],
-            half_byte: Some(0x40)
-        }
-    ))
+    assert!(HashPrefix {
+        data: vec![1, 2, 3],
+        half_byte: Some(0x40)
+    }
+    .matches(&[1, 2, 3, 0x4f, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
 }
 
 #[test]
 fn matches_desired_prefix_matching_data_mismatching_half() {
-    assert!(!matches_desired_prefix(
-        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-        &HashPrefix {
-            data: vec![1, 2, 3],
-            half_byte: Some(0x50)
-        }
-    ))
+    assert!(!HashPrefix {
+        data: vec![1, 2, 3],
+        half_byte: Some(0x50)
+    }
+    .matches(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
 }
 
 #[test]
 fn matches_desired_prefix_mismatching_data_matching_half() {
-    assert!(!matches_desired_prefix(
-        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-        &HashPrefix {
-            data: vec![1, 5, 3],
-            half_byte: Some(0x40)
-        }
-    ))
+    assert!(!HashPrefix {
+        data: vec![1, 5, 3],
+        half_byte: Some(0x40)
+    }
+    .matches(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
 }
 
 #[test]
@@ -440,7 +457,7 @@ fn parse_prefix_empty() {
             data: Vec::new(),
             half_byte: None
         }),
-        parse_prefix("")
+        HashPrefix::new("")
     )
 }
 
@@ -451,7 +468,7 @@ fn parse_prefix_single_char() {
             data: Vec::new(),
             half_byte: Some(0xa0)
         }),
-        parse_prefix("a")
+        HashPrefix::new("a")
     )
 }
 
@@ -462,7 +479,7 @@ fn parse_prefix_even_chars() {
             data: vec![0xab, 0xcd, 0xef],
             half_byte: None
         }),
-        parse_prefix("abcdef")
+        HashPrefix::new("abcdef")
     )
 }
 
@@ -473,7 +490,7 @@ fn parse_prefix_odd_chars() {
             data: vec![0xab, 0xcd, 0xef],
             half_byte: Some(0x50)
         }),
-        parse_prefix("abcdef5")
+        HashPrefix::new("abcdef5")
     )
 }
 
@@ -484,18 +501,18 @@ fn parse_prefix_capital_letters() {
             data: vec![0xab, 0xcd, 0xef],
             half_byte: Some(0xb0)
         }),
-        parse_prefix("ABCDEFB")
+        HashPrefix::new("ABCDEFB")
     )
 }
 
 #[test]
 fn parse_prefix_invalid_even_chars() {
-    assert_eq!(None, parse_prefix("abcdgeb"))
+    assert_eq!(None, HashPrefix::new("abcdgeb"))
 }
 
 #[test]
 fn parse_prefix_invalid_odd_char() {
-    assert_eq!(None, parse_prefix("abcdefg"))
+    assert_eq!(None, HashPrefix::new("abcdefg"))
 }
 
 #[test]
@@ -508,7 +525,7 @@ fn parse_prefix_exact_length_match() {
             ],
             half_byte: None
         }),
-        parse_prefix("1234567812345678123456781234567812345678")
+        HashPrefix::new("1234567812345678123456781234567812345678")
     )
 }
 
@@ -516,7 +533,7 @@ fn parse_prefix_exact_length_match() {
 fn parse_prefix_too_long_with_half_byte() {
     assert_eq!(
         None,
-        parse_prefix("12345678123456781234567812345678123456781")
+        HashPrefix::new("12345678123456781234567812345678123456781")
     )
 }
 
@@ -524,6 +541,6 @@ fn parse_prefix_too_long_with_half_byte() {
 fn parse_prefix_too_many_full_bytes() {
     assert_eq!(
         None,
-        parse_prefix("123456781234567812345678123456781234567812")
+        HashPrefix::new("123456781234567812345678123456781234567812")
     )
 }

@@ -1,5 +1,6 @@
 use sha1::{digest::FixedOutputDirty, Digest, Sha1};
-use std::ops;
+use std::cmp::min;
+use std::ops::Range;
 
 const SHA1_BYTE_LENGTH: usize = 20;
 
@@ -10,90 +11,180 @@ const DYNAMIC_PADDING_LENGTH: usize = 48;
 #[derive(Debug, PartialEq, Clone)]
 pub struct HashPrefix {
     // The full bytes of the prefix.
-    pub data: Vec<u8>,
+    data: Vec<u8>,
 
     // If the desired prefix has an odd number of characters when represented
     // as a hex string, the last character should be specified in `half_byte`.
     // Only the most significant four bits of `half_byte` are used.
-    pub half_byte: Option<u8>,
+    half_byte: Option<u8>,
 }
 
-pub struct SearchParams {
-    pub current_commit: Vec<u8>,
-    pub desired_prefix: HashPrefix,
-    pub counter_range: ops::Range<u64>,
+/// A worker that, when invoked, will look in a predetermined search space on a single
+/// thread, to find a modification to a specific commit that matches a specific hash prefix.
+#[derive(Debug, PartialEq)]
+pub struct HashSearchWorker {
+    processed_commit: ProcessedCommit,
+    desired_prefix: HashPrefix,
+    search_space: Range<u64>,
 }
 
+/// The result of a successful hash search
 #[derive(Debug, PartialEq)]
 pub struct HashMatch {
+    /// The git commit object that has the desired hash, in the format equivalent
+    /// to the output of `git cat-file commit HEAD`.
     pub commit: Vec<u8>,
+
+    /// The hash of the commit, when hashed in git's object encoding
     pub hash: [u8; SHA1_BYTE_LENGTH],
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 struct ProcessedCommit {
     header: Vec<u8>,
     commit: Vec<u8>,
     dynamic_padding_start_index: usize,
 }
 
-// The 256 unique strings of length 8 which contain only ' ' and '\t'.
-// These are computed statically in advance to allow them to be copied quickly.
-static PADDINGS: [[u8; 8]; 256] = {
-    let mut paddings = [[0; 8]; 256];
-    let mut i = 0;
-    while i < 256 {
-        let mut j = 0;
-        while j < 8 {
-            paddings[i][j] = if i & (0x80 >> j) == 0 { b' ' } else { b'\t' };
-            j += 1;
-        }
-        i += 1;
-    }
-    paddings
-};
-
-pub fn iterate_for_match(params: &SearchParams) -> Option<HashMatch> {
-    let ProcessedCommit {
-        header,
-        mut commit,
-        dynamic_padding_start_index,
-    } = process_commit(&params.current_commit);
-
-    // SHA1 works by splitting the input data into 64-byte blocks. Each 64-byte block
-    // can be processed in sequence. Since we're adding whitespace near the end of a
-    // commit object, the first few 64-byte blocks of the commit will always be the same.
-    // Instead of reprocessing those blocks every time, we can just cache the SHA1 state
-    // after processing those blocks, and only process the new padding each time.
-    let cached_sha1_state = Sha1::new()
-        .chain(&header)
-        .chain(&commit[0..dynamic_padding_start_index]);
-
-    let remaining_commit_data = &mut commit[dynamic_padding_start_index..];
-    let mut hash_result = Default::default();
-
-    for counter in params.counter_range.clone() {
-        let dynamic_padding_data = &mut remaining_commit_data[0..DYNAMIC_PADDING_LENGTH];
-        for (padding_chunk, counter_byte) in dynamic_padding_data
-            .chunks_exact_mut(8)
-            .zip(counter.to_le_bytes().iter())
-        {
-            padding_chunk.copy_from_slice(&PADDINGS[*counter_byte as usize]);
-        }
-
-        let mut sha1_hash = cached_sha1_state.clone();
-        sha1_hash.update(&remaining_commit_data);
-        sha1_hash.finalize_into_dirty(&mut hash_result);
-
-        if matches_desired_prefix(hash_result.as_ref(), &params.desired_prefix) {
-            return Some(HashMatch {
-                commit,
-                hash: hash_result.into(),
-            });
+impl HashSearchWorker {
+    /// Creates a worker for a specific commit and prefix, with an initial
+    /// workload of 1 ** 48 units. As a rough approximation depending on hardware,
+    /// each worker can perform about 7 million units of work per second.
+    pub fn new(current_commit: &[u8], desired_prefix: HashPrefix) -> Self {
+        HashSearchWorker {
+            processed_commit: process_commit(current_commit),
+            desired_prefix,
+            search_space: 0..(1 << (DYNAMIC_PADDING_LENGTH as u64)),
         }
     }
 
-    None
+    /// Splits this worker into `divisor` new workers for the same commit and
+    /// desired prefix, with the search space split roughly equally.
+    pub fn split_search_space(self, divisor: u64) -> impl Iterator<Item = Self> {
+        let amount_per_worker = (self.search_space.end - self.search_space.start) / divisor;
+        (0..divisor).map(move |index| {
+            let range_start = index * amount_per_worker + self.search_space.start;
+            let range_end = if index < divisor - 1 {
+                range_start + amount_per_worker
+            } else {
+                // In case the work can't be divided perfectly, just give all the slack to the last
+                // worker. Typically, `amount_per_worker` will be many orders of magnitude larger
+                // than `divisor`, so having a few extra units of work is immaterial.
+                self.search_space.end
+            };
+            HashSearchWorker {
+                processed_commit: self.processed_commit.clone(),
+                desired_prefix: self.desired_prefix.clone(),
+                search_space: range_start..range_end,
+            }
+        })
+    }
+
+    /// Caps a worker's search space to the given size
+    pub fn with_capped_search_space(mut self, workload: u64) -> Self {
+        self.search_space =
+            self.search_space.start..min(self.search_space.end, self.search_space.start + workload);
+        self
+    }
+
+    /// Invokes the worker. The worker will return early with a hash match if it finds one,
+    /// otherwise it will search its entire search space and return `None`.
+    #[inline(never)]
+    pub fn search(self) -> Option<HashMatch> {
+        let HashSearchWorker {
+            search_space,
+            desired_prefix,
+            processed_commit:
+                ProcessedCommit {
+                    header,
+                    mut commit,
+                    dynamic_padding_start_index,
+                },
+        } = self;
+
+        // SHA1 works by splitting the input data into 64-byte blocks. Each 64-byte block
+        // can be processed in sequence. Since we're adding whitespace near the end of a
+        // commit object, the first few 64-byte blocks of the commit will always be the same.
+        // Instead of reprocessing those blocks every time, we can just cache the SHA1 state
+        // after processing those blocks, and only process the new padding each time.
+        let cached_sha1_state = Sha1::new()
+            .chain(&header)
+            .chain(&commit[0..dynamic_padding_start_index]);
+
+        let remaining_commit_data = &mut commit[dynamic_padding_start_index..];
+        let mut hash_result = Default::default();
+
+        for padding_specifier in search_space {
+            // An padding specifier is represented by an integer in the range [0, 2 ** 48).
+            // The 48-byte dynamic padding string is mapped from the 48-bit specifier such that
+            // each byte of padding is a [space/tab] if the corresponding little-endian bit of
+            // the specifier is a [0/1], respectively.
+            let dynamic_padding_data = &mut remaining_commit_data[0..DYNAMIC_PADDING_LENGTH];
+            for (padding_chunk, padding_specifier_byte) in dynamic_padding_data
+                .chunks_exact_mut(8)
+                .zip(padding_specifier.to_le_bytes().iter())
+            {
+                padding_chunk.copy_from_slice(&PADDING_CHUNKS[*padding_specifier_byte as usize]);
+            }
+
+            let mut sha1_hash = cached_sha1_state.clone();
+            sha1_hash.update(&remaining_commit_data);
+            sha1_hash.finalize_into_dirty(&mut hash_result);
+
+            if desired_prefix.matches(hash_result.as_ref()) {
+                return Some(HashMatch {
+                    commit,
+                    hash: hash_result.into(),
+                });
+            }
+        }
+
+        None
+    }
+}
+
+impl HashPrefix {
+    /// Creates a new hash prefix from a hex string, which is at most 40 characters.
+    /// Returns `None` if the supplied prefix was invalid.
+    pub fn new(prefix: &str) -> Option<Self> {
+        if prefix.len() > SHA1_BYTE_LENGTH * 2 {
+            return None;
+        }
+
+        let mut data = Vec::new();
+        for index in 0..(prefix.len() / 2) {
+            match u8::from_str_radix(&prefix[2 * index..2 * index + 2], 16) {
+                Ok(value) => data.push(value),
+                Err(_) => return None,
+            }
+        }
+
+        Some(HashPrefix {
+            data,
+            half_byte: if prefix.len() % 2 == 1 {
+                match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
+                    Ok(value) => Some(value << 4),
+                    Err(_) => return None,
+                }
+            } else {
+                None
+            },
+        })
+    }
+
+    fn matches(&self, hash: &[u8; SHA1_BYTE_LENGTH]) -> bool {
+        self.data == hash[..self.data.len()]
+            && match self.half_byte {
+                Some(half_byte) => (hash[self.data.len()] & 0xf0) == half_byte,
+                None => true,
+            }
+    }
+}
+
+impl Default for HashPrefix {
+    fn default() -> Self {
+        HashPrefix::new("0000000").unwrap()
+    }
 }
 
 fn process_commit(original_commit: &[u8]) -> ProcessedCommit {
@@ -202,39 +293,21 @@ fn get_commit_split_index(commit: &[u8]) -> usize {
             .count()
 }
 
-fn matches_desired_prefix(hash: &[u8; SHA1_BYTE_LENGTH], prefix: &HashPrefix) -> bool {
-    prefix.data == hash[..prefix.data.len()]
-        && match prefix.half_byte {
-            Some(half_byte) => (hash[prefix.data.len()] & 0xf0) == half_byte,
-            None => true,
+// The 256 unique strings of length 8 which contain only ' ' and '\t'.
+// These are computed statically in advance to allow them to be copied quickly.
+static PADDING_CHUNKS: [[u8; 8]; 256] = {
+    let mut padding_chunks = [[0; 8]; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut j = 0;
+        while j < 8 {
+            padding_chunks[i][j] = if i & (0x80 >> j) == 0 { b' ' } else { b'\t' };
+            j += 1;
         }
-}
-
-pub fn parse_prefix(prefix: &str) -> Option<HashPrefix> {
-    if prefix.len() > SHA1_BYTE_LENGTH * 2 {
-        return None;
+        i += 1;
     }
-
-    let mut data = Vec::new();
-    for index in 0..(prefix.len() / 2) {
-        match u8::from_str_radix(&prefix[2 * index..2 * index + 2], 16) {
-            Ok(value) => data.push(value),
-            Err(_) => return None,
-        }
-    }
-
-    Some(HashPrefix {
-        data,
-        half_byte: if prefix.len() % 2 == 1 {
-            match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
-                Ok(value) => Some(value << 4),
-                Err(_) => return None,
-            }
-        } else {
-            None
-        },
-    })
-}
+    padding_chunks
+};
 
 #[cfg(test)]
 mod tests;
