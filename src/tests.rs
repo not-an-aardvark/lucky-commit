@@ -89,7 +89,39 @@ fn search_failure() {
 }
 
 #[test]
-fn search_success() {
+fn search_success_without_gpg_signature() {
+    assert_eq!(
+        Some(HashMatch {
+            commit: format!(
+                "\
+                    tree 0123456701234567012345670123456701234567\n\
+                    parent 7654321076543210765432107654321076543210\n\
+                    author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                    \n\
+                    Do a thing\n\
+                    \n\
+                    Makes some changes to the foo feature{}{}\n",
+                repeat(" ").take(61).collect::<String>(),
+                "  \t                                             "
+            )
+            .into_bytes(),
+            hash: [143, 30, 66, 142, 194, 91, 30, 168, 131, 137, 22, 94, 235, 63, 189, 255, 191, 124, 50, 103]
+        }),
+        HashSearchWorker::new(
+            TEST_COMMIT_WITHOUT_SIGNATURE,
+            HashPrefix {
+                data: vec![0x8f, 0x1e, 0x42],
+                half_byte: Some(0x80),
+            },
+        )
+        .with_capped_search_space(100)
+        .search()
+    );
+}
+
+#[test]
+fn search_success_with_gpg_signature() {
     assert_eq!(
         Some(HashMatch {
             commit: format!(
