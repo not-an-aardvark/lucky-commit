@@ -75,11 +75,15 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
 }
 
 fn find_match(current_commit: &[u8], desired_prefix: &HashPrefix) -> Option<HashMatch> {
+    let full_worker = HashSearchWorker::new(current_commit, desired_prefix.clone());
+
+    if full_worker.is_eligible_for_gpu_searching() {
+        return full_worker.search();
+    }
+
     let (shared_sender, receiver) = mpsc::channel();
     let num_threads = num_cpus::get_physical() as u64;
-    for worker in HashSearchWorker::new(current_commit, desired_prefix.clone())
-        .split_search_space(num_threads)
-    {
+    for worker in full_worker.split_search_space(num_threads) {
         let result_sender = shared_sender.clone();
         thread::spawn(move || {
             /*

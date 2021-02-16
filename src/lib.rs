@@ -1,6 +1,11 @@
+use ocl::{
+    builders::DeviceSpecifier::TypeFlags,
+    flags::{DeviceType, MemFlags},
+    Context, ProQue,
+};
 use sha1::{digest::FixedOutputDirty, Digest, Sha1};
-use std::cmp::min;
-use std::ops::Range;
+use sha1_asm::compress;
+use std::{cmp::min, convert::TryInto, ops::Range};
 
 const SHA1_BYTE_LENGTH: usize = 20;
 
@@ -10,13 +15,12 @@ const DYNAMIC_PADDING_LENGTH: usize = 48;
 /// Defines a target prefix for a commit hash.
 #[derive(Debug, PartialEq, Clone)]
 pub struct HashPrefix {
-    // The full bytes of the prefix.
-    data: Vec<u8>,
-
-    // If the desired prefix has an odd number of characters when represented
-    // as a hex string, the last character should be specified in `half_byte`.
-    // Only the most significant four bits of `half_byte` are used.
-    half_byte: Option<u8>,
+    /// The prefix, as split into big-endian four-byte chunks.
+    /// All bits beyond the length of the prefix are set to 0.
+    data: [u32; 5],
+    /// Mask containing bits set to 1 if the bit at that position is specified
+    /// in the prefix, and 0 otherwise.
+    mask: [u32; 5],
 }
 
 /// A worker that, when invoked, will look in a predetermined search space on a single
@@ -60,6 +64,9 @@ impl HashSearchWorker {
 
     /// Splits this worker into `divisor` new workers for the same commit and
     /// desired prefix, with the search space split roughly equally.
+    /// A worker's search space is an approximation to help with effecient threading. There is
+    /// no guarantee that the resulting workers have perfectly disjoint search spaces, so in theory
+    /// multiple workers could both find the same hash match despite having "split" the space.
     pub fn split_search_space(self, divisor: u64) -> impl Iterator<Item = Self> {
         let amount_per_worker = (self.search_space.end - self.search_space.start) / divisor;
         (0..divisor).map(move |index| {
@@ -80,7 +87,7 @@ impl HashSearchWorker {
         })
     }
 
-    /// Caps a worker's search space to the given size
+    /// Caps a worker's search space to approximately the given size.
     pub fn with_capped_search_space(mut self, workload: u64) -> Self {
         self.search_space =
             self.search_space.start..min(self.search_space.end, self.search_space.start + workload);
@@ -89,8 +96,55 @@ impl HashSearchWorker {
 
     /// Invokes the worker. The worker will return early with a hash match if it finds one,
     /// otherwise it will search its entire search space and return `None`.
-    #[inline(never)]
     pub fn search(self) -> Option<HashMatch> {
+        if self.is_eligible_for_gpu_searching() {
+            self.search_with_gpu().unwrap()
+        } else {
+            self.search_with_cpu()
+        }
+    }
+
+    /// Determines the worker will attempt to use a GPU for these search parameters
+    pub fn is_eligible_for_gpu_searching(&self) -> bool {
+        // If there aren't any GPUs available, using GPUs to search for hashes isn't going to work very well
+        if Context::builder()
+            .devices(TypeFlags(DeviceType::GPU))
+            .build()
+            .unwrap()
+            .devices()
+            .is_empty()
+        {
+            return false;
+        }
+
+        // Commits that are GPG-signed, or have an unusually large number of trailing newlines, are ineligible
+        // for GPU searching at the moment because the padding is not in the final block.
+        if self.processed_commit.commit.len() - self.processed_commit.dynamic_padding_start_index
+            > 55
+        {
+            return false;
+        }
+
+        // In the rare case where the start of the dynamic padding is not block-aligned (see `process_commit`
+        // for details), GPU searching won't work because it assumes that the dynamic padding is at the start
+        // of a block. This case can probably be eliminated in the future by adding more padding.
+        if (self.processed_commit.header.len() + self.processed_commit.dynamic_padding_start_index)
+            % 64
+            != 0
+        {
+            return false;
+        }
+
+        true
+    }
+
+    #[inline(never)]
+    fn search_with_cpu(self) -> Option<HashMatch> {
+        // SHA1 works by splitting the input data into 64-byte blocks. Each 64-byte block
+        // can be processed in sequence. Since we're adding whitespace near the end of a
+        // commit object, the first few 64-byte blocks of the commit will always be the same.
+        // Instead of reprocessing those blocks every time, we can just cache the SHA1 state
+        // after processing those blocks, and only process the new padding each time.
         let HashSearchWorker {
             search_space,
             desired_prefix,
@@ -102,11 +156,6 @@ impl HashSearchWorker {
                 },
         } = self;
 
-        // SHA1 works by splitting the input data into 64-byte blocks. Each 64-byte block
-        // can be processed in sequence. Since we're adding whitespace near the end of a
-        // commit object, the first few 64-byte blocks of the commit will always be the same.
-        // Instead of reprocessing those blocks every time, we can just cache the SHA1 state
-        // after processing those blocks, and only process the new padding each time.
         let cached_sha1_state = Sha1::new()
             .chain(&header)
             .chain(&commit[0..dynamic_padding_start_index]);
@@ -119,13 +168,10 @@ impl HashSearchWorker {
             // The 48-byte dynamic padding string is mapped from the 48-bit specifier such that
             // each byte of padding is a [space/tab] if the corresponding little-endian bit of
             // the specifier is a [0/1], respectively.
-            let dynamic_padding_data = &mut remaining_commit_data[0..DYNAMIC_PADDING_LENGTH];
-            for (padding_chunk, padding_specifier_byte) in dynamic_padding_data
-                .chunks_exact_mut(8)
-                .zip(padding_specifier.to_le_bytes().iter())
-            {
-                padding_chunk.copy_from_slice(&PADDING_CHUNKS[*padding_specifier_byte as usize]);
-            }
+            scatter_padding(
+                padding_specifier,
+                &mut remaining_commit_data[0..DYNAMIC_PADDING_LENGTH],
+            );
 
             let mut sha1_hash = cached_sha1_state.clone();
             sha1_hash.update(&remaining_commit_data);
@@ -141,6 +187,154 @@ impl HashSearchWorker {
 
         None
     }
+
+    fn search_with_gpu(self) -> ocl::Result<Option<HashMatch>> {
+        let HashSearchWorker {
+            search_space,
+            desired_prefix,
+            processed_commit,
+        } = self;
+        let block_ending = processed_commit.finalized_dynamic_padding_suffix();
+        let sha1_state_vector = processed_commit.partially_hash();
+        let ProcessedCommit {
+            header,
+            mut commit,
+            dynamic_padding_start_index,
+        } = processed_commit;
+
+        const BASE_PADDING_SPECIFIER_ARG: &str = "base_padding_specifier";
+
+        let num_threads = *[
+            desired_prefix.estimated_hashes_needed() * 4,
+            search_space.end - search_space.start,
+            // TODO: this value will get used a majority of the time, it should be calibrated more precisely
+            1 << 22,
+        ]
+        .iter()
+        .min()
+        .unwrap() as usize;
+
+        let pro_que = ProQue::builder()
+            .src(include_str!("sha1_prefix_matcher.cl"))
+            .dims(num_threads)
+            .device(TypeFlags(DeviceType::GPU))
+            .build()?;
+        let desired_prefix_data_buffer = pro_que
+            .buffer_builder::<u32>()
+            .len(desired_prefix.data.len())
+            .flags(MemFlags::READ_ONLY)
+            .copy_host_slice(&desired_prefix.data[..])
+            .build()?;
+        let desired_prefix_mask_buffer = pro_que
+            .buffer_builder::<u32>()
+            .len(desired_prefix.mask.len())
+            .flags(MemFlags::READ_ONLY)
+            .copy_host_slice(&desired_prefix.mask[..])
+            .build()?;
+        let initial_state_buffer = pro_que
+            .buffer_builder::<u32>()
+            .len(sha1_state_vector.len())
+            .flags(MemFlags::READ_ONLY)
+            .copy_host_slice(&sha1_state_vector)
+            .build()?;
+        let block_ending_buffer = pro_que
+            .buffer_builder::<u8>()
+            .len(block_ending.len())
+            .flags(MemFlags::READ_ONLY)
+            .copy_host_slice(&block_ending)
+            .build()?;
+        let mut successful_match_receiver_host_handle = [u64::MAX];
+        let successful_match_receiver = pro_que
+            .buffer_builder::<u64>()
+            .len(1)
+            .flags(MemFlags::WRITE_ONLY)
+            .copy_host_slice(&successful_match_receiver_host_handle)
+            .build()?;
+        let kernel = pro_que
+            .kernel_builder("scatter_padding_and_find_match")
+            .arg(&desired_prefix_data_buffer)
+            .arg(&desired_prefix_mask_buffer)
+            .arg(&initial_state_buffer)
+            .arg(&block_ending_buffer)
+            .arg_named(BASE_PADDING_SPECIFIER_ARG, &0) // filled in later
+            .arg(&successful_match_receiver)
+            .build()?;
+
+        for base_padding_specifier in search_space.step_by(num_threads) {
+            kernel.set_arg(BASE_PADDING_SPECIFIER_ARG, base_padding_specifier)?;
+
+            // SAFETY: The OpenCL sha1 script is optimistically assumed to have no memory safety issues
+            unsafe {
+                kernel.enq()?;
+            }
+
+            successful_match_receiver
+                .read(&mut successful_match_receiver_host_handle[..])
+                .enq()?;
+
+            if successful_match_receiver_host_handle[0] != u64::MAX {
+                let successful_padding_specifier = successful_match_receiver_host_handle[0];
+                scatter_padding(
+                    successful_padding_specifier,
+                    &mut commit[dynamic_padding_start_index..dynamic_padding_start_index + 48],
+                );
+                let hash = Sha1::new().chain(&header).chain(&commit).finalize().into();
+
+                assert!(
+                    desired_prefix.matches(&hash),
+                    "\
+                        A GPU search reported a commit with a successful match, but when that \
+                        commit was hashed in postprocessing, it didn't match the desired prefix. \
+                        This is a bug. The most likely explanation is that the two implementations of \
+                        `scatter_padding` in Rust and OpenCL (or the implementations of SHA1) have diverged \
+                        from each other.\n\ndesired prefix:\n\t{:?}\ncommit object produced during \
+                        postprocessing:\n\thash: {}\n\tpadding specifier: {}\n\tcommit: {:?}",
+                    desired_prefix,
+                    hash.iter().map(|byte| format!("{:02x}", *byte)).collect::<String>(),
+                    successful_padding_specifier,
+                    String::from_utf8(commit).unwrap_or_else(|_| "(invalid utf8)".to_owned())
+                );
+
+                return Ok(Some(HashMatch { hash, commit }));
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+impl ProcessedCommit {
+    fn partially_hash(&self) -> [u32; 5] {
+        assert!((self.header.len() + self.dynamic_padding_start_index) % 64 == 0);
+
+        let mut sha1_state = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+        for chunk in self
+            .header
+            .iter()
+            .chain(self.commit[0..self.dynamic_padding_start_index].iter())
+            .copied()
+            .collect::<Vec<u8>>()
+            .chunks_exact(64)
+        {
+            compress(&mut sha1_state, &[chunk.try_into().unwrap()]);
+        }
+
+        sha1_state
+    }
+
+    fn finalized_dynamic_padding_suffix(&self) -> [u8; 16] {
+        let commit_end_index_in_block =
+            self.commit.len() - self.dynamic_padding_start_index - DYNAMIC_PADDING_LENGTH;
+        assert!(commit_end_index_in_block <= 7);
+        let mut finalized_dynamic_padding_suffix = [0; 16];
+        finalized_dynamic_padding_suffix[0..commit_end_index_in_block].copy_from_slice(
+            &self.commit[self.dynamic_padding_start_index + DYNAMIC_PADDING_LENGTH..],
+        );
+        finalized_dynamic_padding_suffix[commit_end_index_in_block] = 0x80;
+        finalized_dynamic_padding_suffix[8..16]
+            .copy_from_slice(&((self.header.len() + self.commit.len()) as u64 * 8).to_be_bytes());
+        finalized_dynamic_padding_suffix
+    }
 }
 
 impl HashPrefix {
@@ -151,39 +345,58 @@ impl HashPrefix {
             return None;
         }
 
-        let mut data = Vec::new();
-        for index in 0..(prefix.len() / 2) {
-            match u8::from_str_radix(&prefix[2 * index..2 * index + 2], 16) {
-                Ok(value) => data.push(value),
-                Err(_) => return None,
-            }
+        let contains_only_valid_characters = prefix.chars().all(|c| {
+            ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
+        });
+
+        if !contains_only_valid_characters {
+            return None;
         }
 
-        Some(HashPrefix {
-            data,
-            half_byte: if prefix.len() % 2 == 1 {
-                match u8::from_str_radix(&prefix[prefix.len() - 1..], 16) {
-                    Ok(value) => Some(value << 4),
-                    Err(_) => return None,
-                }
-            } else {
-                None
-            },
-        })
+        let mut data = [0u32; 5];
+        let mut mask = [0u32; 5];
+
+        for (i, chunk) in prefix.as_bytes().chunks(8).enumerate() {
+            let value =
+                u32::from_str_radix(&String::from_utf8(chunk.to_vec()).unwrap(), 16).unwrap();
+            let num_unset_bits = 32 - 4 * chunk.len();
+            data[i] = value << num_unset_bits;
+            mask[i] = u32::MAX >> num_unset_bits << num_unset_bits;
+        }
+
+        Some(HashPrefix { data, mask })
     }
 
+    #[inline(always)]
     fn matches(&self, hash: &[u8; SHA1_BYTE_LENGTH]) -> bool {
-        self.data == hash[..self.data.len()]
-            && match self.half_byte {
-                Some(half_byte) => (hash[self.data.len()] & 0xf0) == half_byte,
-                None => true,
-            }
+        hash.chunks(4)
+            .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+            .zip(&self.mask)
+            .map(|(hash_word, mask_word)| hash_word & *mask_word)
+            .zip(&self.data)
+            .all(|(masked_hash_word, desired_prefix_word)| masked_hash_word == *desired_prefix_word)
+    }
+
+    fn estimated_hashes_needed(&self) -> u64 {
+        2u64.saturating_pow(self.mask.iter().map(|word| word.count_ones()).sum())
     }
 }
 
 impl Default for HashPrefix {
     fn default() -> Self {
         HashPrefix::new("0000000").unwrap()
+    }
+}
+
+// This should be kept in sync with the OpenCL `scatter_padding` implementation.
+#[inline(always)]
+fn scatter_padding(padding_specifier: u64, padding_container: &mut [u8]) {
+    debug_assert!(padding_container.len() == DYNAMIC_PADDING_LENGTH);
+    for (padding_chunk, padding_specifier_byte) in padding_container
+        .chunks_exact_mut(8)
+        .zip(padding_specifier.to_le_bytes().iter())
+    {
+        padding_chunk.copy_from_slice(&PADDING_CHUNKS[*padding_specifier_byte as usize]);
     }
 }
 

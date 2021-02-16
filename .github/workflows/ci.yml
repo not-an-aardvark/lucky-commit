@@ -22,6 +22,8 @@ jobs:
         toolchain: stable
         override: true
         components: rustfmt, clippy
+    - name: Install OpenCL
+      run: sudo apt-get install ocl-icd-opencl-dev
     - name: Build
       run: cargo build --verbose
     - name: Format

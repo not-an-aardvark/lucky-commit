@@ -19,3 +19,5 @@ path = "src/bin.rs"
 
 num_cpus = "1.0"
 "sha-1" = { version = "0.9", features = ["std", "asm"] }
+"sha1-asm" = "0.5"
+ocl = "0.19"
