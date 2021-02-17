@@ -1,7 +1,7 @@
 use ocl::{
     builders::DeviceSpecifier::TypeFlags,
     flags::{DeviceType, MemFlags},
-    Context, ProQue,
+    Platform, ProQue,
 };
 use sha1::{compress, digest::FixedOutputDirty, Digest, Sha1};
 use std::{cmp::min, convert::TryInto, ops::Range};
@@ -103,16 +103,23 @@ impl HashSearchWorker {
         }
     }
 
+    fn opencl_available() -> bool {
+        Platform::first().is_ok()
+    }
+
+    /// Determines whether any GPUs are present and available to use for searching
+    pub fn gpus_available() -> bool {
+        Self::opencl_available()
+            && !TypeFlags(DeviceType::GPU)
+                .to_device_list(None::<Platform>)
+                .unwrap()
+                .is_empty()
+    }
+
     /// Determines the worker will attempt to use a GPU for these search parameters
     pub fn is_eligible_for_gpu_searching(&self) -> bool {
         // If there aren't any GPUs available, using GPUs to search for hashes isn't going to work very well
-        if Context::builder()
-            .devices(TypeFlags(DeviceType::GPU))
-            .build()
-            .unwrap()
-            .devices()
-            .is_empty()
-        {
+        if !Self::gpus_available() {
             return false;
         }
 

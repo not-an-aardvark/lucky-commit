@@ -20,7 +20,14 @@ pub fn run_single_core_benchmark() {
                 Test commit for benchmarking performance changes\n",
             HashPrefix::new("000000000000000000000000000000000000000").unwrap(),
         )
-        .with_capped_search_space(1 << 28)
+        .with_capped_search_space(
+            (1 << 28)
+                / if HashSearchWorker::gpus_available() {
+                    1
+                } else {
+                    num_cpus::get_physical() as u64
+                }
+        )
         .search()
     );
 }
