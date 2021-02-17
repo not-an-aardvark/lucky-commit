@@ -11,6 +11,10 @@ license = "MIT"
 name = "lucky_commit_lib"
 path = "src/lib.rs"
 
+[features]
+default = ["opencl"]
+opencl = ["ocl"]
+
 [[bin]]
 name = "lucky_commit"
 path = "src/bin.rs"
@@ -19,4 +23,4 @@ path = "src/bin.rs"
 
 num_cpus = "1.0"
 "sha-1" = { version = "0.9", features = ["std", "asm", "compress"] }
-ocl = "0.19"
+ocl = { version = "0.19", optional = true }

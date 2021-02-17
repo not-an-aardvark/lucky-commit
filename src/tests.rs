@@ -117,11 +117,9 @@ fn search_success_without_gpg_signature() {
     );
 }
 
+#[cfg(feature = "opencl")]
 #[test]
 fn search_success_without_gpg_signature_gpu_cpu_parity() {
-    if !HashSearchWorker::gpus_available() {
-        return;
-    }
     assert_eq!(
         HashSearchWorker::new(
             TEST_COMMIT_WITHOUT_SIGNATURE,
@@ -171,11 +169,9 @@ fn search_success_with_multi_word_prefix() {
     );
 }
 
+#[cfg(feature = "opencl")]
 #[test]
 fn search_success_with_multi_word_prefix_gpu_cpu_parity() {
-    if !HashSearchWorker::gpus_available() {
-        return;
-    }
     assert_eq!(
         HashSearchWorker::new(
             TEST_COMMIT_WITHOUT_SIGNATURE,

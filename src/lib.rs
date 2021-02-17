@@ -1,10 +1,14 @@
+use sha1::{digest::FixedOutputDirty, Digest, Sha1};
+use std::{cmp::min, convert::TryInto, ops::Range};
+
+#[cfg(feature = "opencl")]
 use ocl::{
     builders::DeviceSpecifier::TypeFlags,
     flags::{DeviceType, MemFlags},
     Platform, ProQue,
 };
-use sha1::{compress, digest::FixedOutputDirty, Digest, Sha1};
-use std::{cmp::min, convert::TryInto, ops::Range};
+#[cfg(feature = "opencl")]
+use sha1::compress;
 
 const SHA1_BYTE_LENGTH: usize = 20;
 
@@ -96,24 +100,31 @@ impl HashSearchWorker {
     /// Invokes the worker. The worker will return early with a hash match if it finds one,
     /// otherwise it will search its entire search space and return `None`.
     pub fn search(self) -> Option<HashMatch> {
+        #[cfg(feature = "opencl")]
         if self.is_eligible_for_gpu_searching() {
-            self.search_with_gpu().unwrap()
-        } else {
-            self.search_with_cpu()
+            return self.search_with_gpu().unwrap();
         }
+
+        self.search_with_cpu()
     }
 
+    #[cfg(feature = "opencl")]
     fn opencl_available() -> bool {
         Platform::first().is_ok()
     }
 
-    /// Determines whether any GPUs are present and available to use for searching
-    pub fn gpus_available() -> bool {
+    #[cfg(feature = "opencl")]
+    fn gpus_available() -> bool {
         Self::opencl_available()
             && !TypeFlags(DeviceType::GPU)
                 .to_device_list(None::<Platform>)
                 .unwrap()
                 .is_empty()
+    }
+
+    #[cfg(not(feature = "opencl"))]
+    fn gpus_available() -> bool {
+        false
     }
 
     /// Determines the worker will attempt to use a GPU for these search parameters
@@ -194,6 +205,7 @@ impl HashSearchWorker {
         None
     }
 
+    #[cfg(feature = "opencl")]
     fn search_with_gpu(self) -> ocl::Result<Option<HashMatch>> {
         let HashSearchWorker {
             search_space,
@@ -309,6 +321,7 @@ impl HashSearchWorker {
     }
 }
 
+#[cfg(feature = "opencl")]
 impl ProcessedCommit {
     fn partially_hash(&self) -> [u32; 5] {
         assert!((self.header.len() + self.dynamic_padding_start_index) % 64 == 0);
@@ -383,6 +396,7 @@ impl HashPrefix {
             .all(|(masked_hash_word, desired_prefix_word)| masked_hash_word == *desired_prefix_word)
     }
 
+    #[cfg(feature = "opencl")]
     fn estimated_hashes_needed(&self) -> u64 {
         2u64.saturating_pow(self.mask.iter().map(|word| word.count_ones()).sum())
     }

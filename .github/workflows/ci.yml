@@ -22,15 +22,13 @@ jobs:
         toolchain: stable
         override: true
         components: rustfmt, clippy
-    - name: Install OpenCL
-      run: sudo apt-get install ocl-icd-opencl-dev
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --verbose --no-default-features
     - name: Format
       run: cargo fmt -- --check
     - name: Lint
       run: cargo clippy
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose --no-default-features
     - name: Run benchmark
-      run: 'cargo build --release && time target/release/lucky_commit --benchmark'
+      run: 'cargo build --release --no-default-features && time target/release/lucky_commit --benchmark'

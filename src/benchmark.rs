@@ -9,6 +9,11 @@ pub fn run_single_core_benchmark() {
     //   a real run does a ~single-digit number of filesystem operations.
     //
     // To use: run `time target/release/lucky_commit --benchmark`.
+    #[cfg(feature = "opencl")]
+    let search_space = 1 << 28;
+    #[cfg(not(feature = "opencl"))]
+    let search_space = (1 << 28) / num_cpus::get_physical() as u64;
+
     assert_eq!(
         None,
         HashSearchWorker::new(
@@ -20,14 +25,7 @@ pub fn run_single_core_benchmark() {
                 Test commit for benchmarking performance changes\n",
             HashPrefix::new("000000000000000000000000000000000000000").unwrap(),
         )
-        .with_capped_search_space(
-            (1 << 28)
-                / if HashSearchWorker::gpus_available() {
-                    1
-                } else {
-                    num_cpus::get_physical() as u64
-                }
-        )
+        .with_capped_search_space(search_space)
         .search()
     );
 }
