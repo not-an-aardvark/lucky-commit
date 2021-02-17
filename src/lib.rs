@@ -3,8 +3,7 @@ use ocl::{
     flags::{DeviceType, MemFlags},
     Context, ProQue,
 };
-use sha1::{digest::FixedOutputDirty, Digest, Sha1};
-use sha1_asm::compress;
+use sha1::{compress, digest::FixedOutputDirty, Digest, Sha1};
 use std::{cmp::min, convert::TryInto, ops::Range};
 
 const SHA1_BYTE_LENGTH: usize = 20;
@@ -316,7 +315,7 @@ impl ProcessedCommit {
             .collect::<Vec<u8>>()
             .chunks_exact(64)
         {
-            compress(&mut sha1_state, &[chunk.try_into().unwrap()]);
+            compress(&mut sha1_state, &[Clone::clone(chunk.into())]);
         }
 
         sha1_state

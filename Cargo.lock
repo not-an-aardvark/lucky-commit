@@ -251,7 +251,6 @@ dependencies = [
  "num_cpus",
  "ocl",
  "sha-1",
- "sha1-asm 0.5.0",
 ]
 
 [[package]]
@@ -533,9 +532,9 @@ checksum = "d4f410fedcf71af0345d7607d246e7ad15faaadd49d240ee3b24e5dc21a820ac"
 
 [[package]]
 name = "sha-1"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4b312c3731e3fe78a185e6b9b911a7aa715b8e31cce117975219aab2acf285d"
+checksum = "dfebf75d25bd900fd1e7d11501efab59bc846dbc76196839663e6637bba9f25f"
 dependencies = [
  "block-buffer",
  "cfg-if 1.0.0",
@@ -543,7 +542,7 @@ dependencies = [
  "digest",
  "libc",
  "opaque-debug",
- "sha1-asm 0.4.4",
+ "sha1-asm",
 ]
 
 [[package]]
@@ -551,15 +550,6 @@ name = "sha1-asm"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9dae2289dd5f5dc67fb0f341a5676c5c197415c51ce7345ae1bd0d36a6cbbfc"
-dependencies = [
- "cc",
-]
-
-[[package]]
-name = "sha1-asm"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f1b2260fd0a1567fec804f1f746847f03b8360be62d2e95f096f3c37f997dc"
 dependencies = [
  "cc",
 ]
