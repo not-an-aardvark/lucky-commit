@@ -2,6 +2,7 @@
 use ocl::{
     builders::DeviceSpecifier::TypeFlags,
     flags::{DeviceType, MemFlags},
+    prm::{Uint16, Uint4},
     Platform, ProQue,
 };
 use sha1::{
@@ -9,6 +10,8 @@ use sha1::{
     digest::{generic_array::GenericArray, BlockInput},
     Sha1,
 };
+#[cfg(feature = "opencl")]
+use std::convert::TryInto;
 use std::{cmp::min, ops::Range};
 
 const SHA1_BYTE_LENGTH: usize = 20;
@@ -130,20 +133,7 @@ impl HashSearchWorker {
 
     /// Determines the worker will attempt to use a GPU for these search parameters
     pub fn is_eligible_for_gpu_searching(&self) -> bool {
-        // If there aren't any GPUs available, using GPUs to search for hashes isn't going to work very well
-        if !Self::gpus_available() {
-            return false;
-        }
-
-        // Commits that are GPG-signed, or have an unusually large number of trailing newlines, are ineligible
-        // for GPU searching at the moment because the padding is not in the final block.
-        if self.processed_commit.commit.len() - self.processed_commit.dynamic_padding_start_index
-            > 55
-        {
-            return false;
-        }
-
-        true
+        Self::gpus_available()
     }
 
     #[inline(never)]
@@ -196,7 +186,6 @@ impl HashSearchWorker {
             processed_commit,
         } = self;
         let (sha1_state_vector, mut remaining_blocks) = processed_commit.partially_hash();
-        assert!(remaining_blocks.len() == 1);
 
         let ProcessedCommit {
             header: _,
@@ -239,12 +228,32 @@ impl HashSearchWorker {
             .flags(MemFlags::READ_ONLY)
             .copy_host_slice(&sha1_state_vector)
             .build()?;
-        let block_ending_buffer = pro_que
-            .buffer_builder::<u8>()
-            .len(16)
-            .flags(MemFlags::READ_ONLY)
-            .copy_host_slice(&remaining_blocks[0][48..])
-            .build()?;
+
+        // This is a slight hack -- it seems like passing a zero-length buffer
+        // (or null pointer) to an OpenCL kernel is not allowed. However, since we're
+        // passing the length in separately anyway, we can just pass a buffer of length
+        // 1 if there are no post-padding blocks, and it will never get used.
+        let post_padding_blocks_buffer = if remaining_blocks.len() > 1 {
+            pro_que
+                .buffer_builder::<Uint16>()
+                .len(remaining_blocks.len() - 1)
+                .flags(MemFlags::READ_ONLY)
+                .copy_host_slice(
+                    remaining_blocks[1..]
+                        .iter()
+                        .map(|block| Uint16::from(encode_big_endian_words_64(block)))
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                )
+                .build()?
+        } else {
+            pro_que
+                .buffer_builder::<Uint16>()
+                .len(1)
+                .flags(MemFlags::READ_ONLY)
+                .copy_host_slice(&[Uint16::zero()])
+                .build()?
+        };
         let mut successful_match_receiver_host_handle = [u64::MAX];
         let successful_match_receiver = pro_que
             .buffer_builder::<u64>()
@@ -257,8 +266,12 @@ impl HashSearchWorker {
             .arg(&desired_prefix_data_buffer)
             .arg(&desired_prefix_mask_buffer)
             .arg(&initial_state_buffer)
-            .arg(&block_ending_buffer)
             .arg_named(BASE_PADDING_SPECIFIER_ARG, &0) // filled in later
+            .arg(Uint4::from(encode_big_endian_words_16(
+                &remaining_blocks[0][48..].try_into().unwrap(),
+            )))
+            .arg(remaining_blocks.len() - 1)
+            .arg(&post_padding_blocks_buffer)
             .arg(&successful_match_receiver)
             .build()?;
 
@@ -418,6 +431,30 @@ fn flatten_hash(hash: &[u32; 5]) -> [u8; 20] {
         output_chunk.copy_from_slice(&hash_word.to_be_bytes());
     }
     output
+}
+
+#[cfg(feature = "opencl")]
+fn encode_big_endian_words_16(data: &[u8; 16]) -> [u32; 4] {
+    data.chunks(4)
+        .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+        .collect::<Vec<_>>()
+        .as_slice()
+        .try_into()
+        .unwrap()
+}
+
+// Maybe soon const generics will finally reach stable, and this function
+// won't need to be implemented twice.
+#[cfg(feature = "opencl")]
+fn encode_big_endian_words_64(
+    data: &GenericArray<u8, <Sha1 as BlockInput>::BlockSize>,
+) -> [u32; 16] {
+    data.chunks(4)
+        .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+        .collect::<Vec<_>>()
+        .as_slice()
+        .try_into()
+        .unwrap()
 }
 
 // This should be kept in sync with the OpenCL `scatter_padding` implementation.
