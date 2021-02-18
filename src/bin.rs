@@ -135,6 +135,6 @@ fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
 
 fn to_hex_string(hash: &[u8]) -> String {
     hash.iter()
-        .map(|byte| format!("{:02x}", *byte))
+        .map(|&byte| format!("{:02x}", byte))
         .collect::<String>()
 }

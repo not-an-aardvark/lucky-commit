@@ -142,16 +142,6 @@ impl HashSearchWorker {
             return false;
         }
 
-        // In the rare case where the start of the dynamic padding is not block-aligned (see `process_commit`
-        // for details), GPU searching won't work because it assumes that the dynamic padding is at the start
-        // of a block. This case can probably be eliminated in the future by adding more padding.
-        if (self.processed_commit.header.len() + self.processed_commit.dynamic_padding_start_index)
-            % 64
-            != 0
-        {
-            return false;
-        }
-
         true
     }
 
@@ -308,7 +298,7 @@ impl HashSearchWorker {
                         from each other.\n\ndesired prefix:\n\t{:?}\ncommit object produced during \
                         postprocessing:\n\thash: {}\n\tpadding specifier: {}\n\tcommit: {:?}",
                     desired_prefix,
-                    hash.iter().map(|byte| format!("{:02x}", *byte)).collect::<String>(),
+                    hash.iter().map(|&byte| format!("{:02x}", byte)).collect::<String>(),
                     successful_padding_specifier,
                     String::from_utf8(commit).unwrap_or_else(|_| "(invalid utf8)".to_owned())
                 );
@@ -391,9 +381,9 @@ impl HashPrefix {
         hash.chunks(4)
             .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
             .zip(&self.mask)
-            .map(|(hash_word, mask_word)| hash_word & *mask_word)
+            .map(|(hash_word, &mask_word)| hash_word & mask_word)
             .zip(&self.data)
-            .all(|(masked_hash_word, desired_prefix_word)| masked_hash_word == *desired_prefix_word)
+            .all(|(masked_hash_word, &desired_prefix_word)| masked_hash_word == desired_prefix_word)
     }
 
     #[cfg(feature = "opencl")]
@@ -429,13 +419,12 @@ fn process_commit(original_commit: &[u8]) -> ProcessedCommit {
     // * Up to 63 space characters, as static padding. This is inserted so that the dynamic padding
     //   that follows it will be at a multiple-of-64-byte offset. Since the performance-intensive
     //   search involves hashing all of the 64-byte blocks starting with the dynamic padding, this
-    //   ensures that the dynamic padding is always in a single block. Note that it sometimes won't
-    //   be possible to align the dynamic padding perfectly, because adding static padding also
-    //   increases the length of the commit object used in the initial header, and this could
-    //   bump the alignment twice if e.g. the length increases from 999 to 1000. As a result, in
-    //   rare cases the dynamic padding will actually be at a multiple-of-64-byte + 1 offset,
-    //   which isn't the end of the world because everything that follows the static padding
-    //   will usually fit in one block anyway.
+    //   ensures that the dynamic padding is always in a single block. Note that in pathological cases,
+    //   more than 63 space characters will be added to align the dynamic padding. This is because
+    //   adding static padding also increases the length of the commit object used in the initial header,
+    //   and this could bump the alignment twice if e.g. the length increases from 999 to 1000. In these
+    //   cases, an additional 63 spaces will be added as static padding, to ensure that the start of the
+    //   dynamic padding is always aligned.
     // * 48 bytes of dynamic padding, consisting of space and tab characters. The ultimate goal
     //   is to find some combination of spaces and tabs that produces the desired hash. A 48-byte
     //   length was chosen with the goal of having everything that follows the static padding
@@ -454,15 +443,14 @@ fn process_commit(original_commit: &[u8]) -> ProcessedCommit {
     // rather than piling onto it.
     let replaceable_padding_size = original_commit[commit_split_index..]
         .iter()
-        .take_while(|byte| **byte == b' ' || **byte == b'\t')
+        .take_while(|&&byte| byte == b' ' || byte == b'\t')
         .count();
-    let approximate_length_before_static_padding =
-        format!("commit {}\x00", original_commit.len()).len() + commit_split_index;
 
     // Use enough static padding to pad to a multiple of 64
-    let static_padding_length = (DYNAMIC_PADDING_ALIGNMENT
-        - (approximate_length_before_static_padding % DYNAMIC_PADDING_ALIGNMENT))
-        % DYNAMIC_PADDING_ALIGNMENT;
+    let static_padding_length = compute_static_padding_length(
+        commit_split_index,
+        original_commit.len() - replaceable_padding_size + DYNAMIC_PADDING_LENGTH,
+    );
 
     let commit_length = original_commit.len() - replaceable_padding_size
         + static_padding_length
@@ -476,7 +464,7 @@ fn process_commit(original_commit: &[u8]) -> ProcessedCommit {
     commit.resize(commit.len() + static_padding_length, b' ');
 
     let dynamic_padding_start_index = commit.len();
-    assert!((dynamic_padding_start_index + header.len()) % DYNAMIC_PADDING_ALIGNMENT <= 1);
+    assert!((dynamic_padding_start_index + header.len()) % DYNAMIC_PADDING_ALIGNMENT == 0);
 
     // Add dynamic padding, initialized to tabs for now
     commit.resize(commit.len() + DYNAMIC_PADDING_LENGTH, b'\t');
@@ -522,8 +510,51 @@ fn get_commit_split_index(commit: &[u8]) -> usize {
         - commit
             .iter()
             .rev()
-            .take_while(|byte| **byte == b' ' || **byte == b'\t' || **byte == b'\n')
+            .take_while(|&&byte| byte == b' ' || byte == b'\t' || byte == b'\n')
             .count()
+}
+
+// Returns the smallest nonnegative integer `static_padding_length` such that:
+//   static_padding_length
+// + commit_length_before_static_padding
+// + 8
+// + (number of digits in the base10 representation of
+//       commit_length_excluding_static_padding + static_padding_length)
+// is a multiple of 64.
+//
+// The 8 comes from the length of the word `commit`, plus a space and a null character, in
+// git's commit hashing format.
+fn compute_static_padding_length(
+    commit_length_before_static_padding: usize,
+    commit_length_excluding_static_padding: usize,
+) -> usize {
+    let compute_alignment = |padding_len: usize| {
+        (format!(
+            "commit {}\x00",
+            commit_length_excluding_static_padding + padding_len
+        )
+        .len()
+            + commit_length_before_static_padding
+            + padding_len)
+            % 64
+    };
+    let prefix_length_estimate = format!("commit {}\x00", commit_length_excluding_static_padding)
+        .len()
+        + commit_length_before_static_padding;
+    let initial_padding_length_guess = (64 - prefix_length_estimate % 64) % 64;
+
+    let static_padding_length = if compute_alignment(initial_padding_length_guess) == 0 {
+        initial_padding_length_guess
+    } else if compute_alignment(initial_padding_length_guess - 1) == 0 {
+        initial_padding_length_guess - 1
+    } else {
+        initial_padding_length_guess + 63
+    };
+
+    assert_eq!(0, compute_alignment(static_padding_length));
+    debug_assert!((0..static_padding_length).all(|len| compute_alignment(len) != 0));
+
+    static_padding_length
 }
 
 // The 256 unique strings of length 8 which contain only ' ' and '\t'.

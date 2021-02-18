@@ -485,6 +485,80 @@ fn process_commit_with_gpg_stuff_in_email() {
     )
 }
 
+macro_rules! pathological_commit_format_string {
+    () => {
+        "\
+            tree 0123456701234567012345670123456701234567\n\
+            parent 7654321076543210765432107654321076543210\n\
+            author Foo Bár <foo@example.com> 1513980859 -0500\n\
+            committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+            \n\
+            This commit is a pathological case for `process_commit`\n\
+            \n\
+            If it adds 41 bytes of static padding, then the total length of the \n\
+            commit will be 999 bytes, and the dynamic padding that follows will \n\
+            will start one byte too soon to be 64-byte aligned. If it adds 42 bytes \n\
+            of static padding, then the total length of the commit will be 1000 bytes. \n\
+            Since this is now a four-digit number, it will add an additional byte to the \n\
+            header, so the dynamic padding will start one byte to late to be 64-byte \n\
+            aligned. We should detect this case and add 105 bytes of static padding, \n\
+            ensuring that the dynamic padding is aligned. This is the only case where \n\
+            `process_commit` will add more than 63 bytes of static padding.{}{}\n\n\n"
+    };
+}
+
+#[test]
+fn process_commit_pathological_padding_alignment() {
+    assert_eq!(
+        ProcessedCommit {
+            header: b"commit 1063\x00".to_vec(),
+            commit: format!(
+                pathological_commit_format_string!(),
+                repeat(" ").take(105).collect::<String>(),
+                repeat("\t").take(48).collect::<String>(),
+            )
+            .into_bytes(),
+            dynamic_padding_start_index: 1012,
+        },
+        process_commit(&format!(pathological_commit_format_string!(), "", "").into_bytes())
+    )
+}
+
+#[test]
+fn compute_static_padding_length_simple() {
+    assert_eq!(compute_static_padding_length(226, 300), 19)
+}
+
+#[test]
+fn compute_static_padding_length_zero() {
+    assert_eq!(compute_static_padding_length(245, 300), 0)
+}
+
+#[test]
+fn compute_static_padding_length_max() {
+    assert_eq!(compute_static_padding_length(246, 300), 63)
+}
+
+#[test]
+fn compute_static_padding_length_increasing_digit_count() {
+    assert_eq!(compute_static_padding_length(920, 980), 28)
+}
+
+#[test]
+fn compute_static_padding_length_increasing_digit_count_to_power_of_ten_minus_one() {
+    assert_eq!(compute_static_padding_length(941, 991), 8)
+}
+
+#[test]
+fn compute_static_padding_length_increasing_digit_count_to_power_of_ten() {
+    assert_eq!(compute_static_padding_length(940, 992), 8)
+}
+
+#[test]
+fn compute_static_padding_length_solution_overlaps_digit_count_boundary() {
+    assert_eq!(compute_static_padding_length(940, 991), 72)
+}
+
 #[test]
 fn matches_desired_prefix_single_half() {
     assert!(HashPrefix::new("1")
