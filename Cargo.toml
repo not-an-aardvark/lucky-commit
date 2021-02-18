@@ -22,5 +22,5 @@ path = "src/bin.rs"
 [dependencies]
 
 num_cpus = "1.0"
-"sha-1" = { version = "0.9", features = ["std", "asm", "compress"] }
+"sha-1" = { version = "0.9", "default-features" = false, features = ["asm", "compress"] }
 ocl = { version = "0.19", optional = true }

@@ -561,44 +561,40 @@ fn compute_static_padding_length_solution_overlaps_digit_count_boundary() {
 
 #[test]
 fn matches_desired_prefix_single_half() {
-    assert!(HashPrefix::new("1")
-        .unwrap()
-        .matches(&[0x1e; SHA1_BYTE_LENGTH]))
+    assert!(HashPrefix::new("1").unwrap().matches(&[0x1e1e1e1e; 5]))
 }
 
 #[test]
 fn matches_desired_prefix_single_half_mismatch() {
-    assert!(!HashPrefix::new("1")
-        .unwrap()
-        .matches(&[0x21; SHA1_BYTE_LENGTH]))
+    assert!(!HashPrefix::new("1").unwrap().matches(&[0x21212121; 5]))
 }
 
 #[test]
 fn matches_desired_prefix_data_without_half() {
     assert!(HashPrefix::new("010203")
         .unwrap()
-        .matches(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
+        .matches(&[0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e0f10, 0x11121314]))
 }
 
 #[test]
 fn matches_desired_prefix_matching_data_and_half() {
     assert!(HashPrefix::new("0102034")
         .unwrap()
-        .matches(&[1, 2, 3, 0x4f, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
+        .matches(&[0x0102034f, 0x05060708, 0x090a0b0c, 0x0d0e0f10, 0x11121314]))
 }
 
 #[test]
 fn matches_desired_prefix_matching_data_mismatching_half() {
     assert!(!HashPrefix::new("0102035")
         .unwrap()
-        .matches(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
+        .matches(&[0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e0f10, 0x11121314]))
 }
 
 #[test]
 fn matches_desired_prefix_mismatching_data_matching_half() {
     assert!(!HashPrefix::new("0105034")
         .unwrap()
-        .matches(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
+        .matches(&[0x0102034f, 0x05060708, 0x090a0b0c, 0x0d0e0f10, 0x11121314]))
 }
 
 #[test]
