@@ -17,7 +17,7 @@ fn main() {
     }
 
     match args.len() {
-        1 => run_lucky_commit(&Default::default()),
+        1 => run_lucky_commit(&HashPrefix::default()),
         2 => match HashPrefix::new(&args[1]) {
             Some(prefix) => run_lucky_commit(&prefix),
             None => print_usage_and_exit(),
@@ -77,7 +77,7 @@ fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
 fn find_match(current_commit: &[u8], desired_prefix: &HashPrefix) -> Option<HashMatch> {
     let full_worker = HashSearchWorker::new(current_commit, desired_prefix.clone());
 
-    if full_worker.is_eligible_for_gpu_searching() {
+    if HashSearchWorker::gpus_available() {
         return full_worker.search();
     }
 

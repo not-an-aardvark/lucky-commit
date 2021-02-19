@@ -61,7 +61,7 @@ I've rewritten the `lucky-commit` project several times as a method to learn new
 
 `lucky-commit`'s performance is determined by how powerful your computer is, and whether you GPG-sign your commits.
 
-The main bottleneck is SHA1 throughput. The default hash prefix of `0000000` has length 7, so on average, `lucky-commit` needs to compute  16<sup>7</sup> SHA1 hashes.
+The main bottleneck is SHA1 throughput. The default hash prefix of `0000000` has length 7, so on average, `lucky-commit` needs to compute 16<sup>7</sup> SHA1 hashes.
 
 For non-GPG-signed commits, `lucky-commit` adds its whitespace to a 64-byte-aligned block at the very end of the commit message. Since everything that precedes the whitespace is constant for any particular commit, this allows `lucky-commit` to cache the SHA1 buffer state and only hash a single 64-byte block on each attempt.
 
