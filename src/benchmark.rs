@@ -1,19 +1,18 @@
 use lucky_commit_lib::{HashPrefix, HashSearchWorker};
 
 pub fn run_single_core_benchmark() {
-    // Runs a benchmark for performance testing. Using a single core, this does a constant
-    // hash search. This benchmark should take roughly the same amount of time as running
-    // `lucky_commit` with no arguments, but the performance should be much more consistent.
+    // Runs a benchmark for performance testing. This does a constant hash search. This benchmark
+    // should take roughly the same amount of time as running `lucky_commit` with no arguments, but
+    // the performance should be much more consistent.
     // Caveats:
     // * The benchmark doesn't spawn any git commands or interact with the filesystem, whereas
     //   a real run does a ~single-digit number of filesystem operations.
+    // * When built without OpenCL support, this might slightly underestimate performance if threads
+    //   end sharing CPU load unequally, because this benchmark will wait until every thread finishes,
+    //   and during that time threads that have already finished will be idle. In a more realistic
+    //   scenario, each thread would almost always still be doing work at any given time.
     //
     // To use: run `time target/release/lucky_commit --benchmark`.
-    #[cfg(feature = "opencl")]
-    let search_space = 1 << 28;
-    #[cfg(not(feature = "opencl"))]
-    let search_space = (1 << 28) / num_cpus::get_physical() as u64;
-
     assert_eq!(
         None,
         HashSearchWorker::new(
@@ -25,7 +24,7 @@ pub fn run_single_core_benchmark() {
                 Test commit for benchmarking performance changes\n",
             HashPrefix::new("000000000000000000000000000000000000000").unwrap(),
         )
-        .with_capped_search_space(search_space)
+        .with_capped_search_space(1 << 28)
         .search()
     );
 }

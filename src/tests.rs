@@ -103,16 +103,44 @@ fn search_success_without_gpg_signature() {
                 "  \t                                             "
             )
             .into_bytes(),
-            hash: [
-                143, 30, 66, 142, 194, 91, 30, 168, 131, 137, 22, 94, 235, 63, 189, 255, 191, 124,
-                50, 103
-            ]
+            hash: "8f1e428ec25b1ea88389165eeb3fbdffbf7c3267".to_owned()
         }),
         HashSearchWorker::new(
             TEST_COMMIT_WITHOUT_SIGNATURE,
             HashPrefix::new("8f1e428").unwrap(),
         )
         .with_capped_search_space(100)
+        .search()
+    );
+}
+
+#[test]
+fn search_success_with_full_prefix_and_no_capped_space() {
+    // If this test keeps running and never finishes, it might indicate a bug in the lame-duck thread
+    // signalling (where a single thread  finds a match, but the other threads don't realize that they
+    // were supposed to stop searching)
+    assert_eq!(
+        Some(HashMatch {
+            commit: format!(
+                "\
+                    tree 0123456701234567012345670123456701234567\n\
+                    parent 7654321076543210765432107654321076543210\n\
+                    author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                    \n\
+                    Do a thing\n\
+                    \n\
+                    Makes some changes to the foo feature{}{}\n",
+                repeat(" ").take(61).collect::<String>(),
+                "  \t                                             "
+            )
+            .into_bytes(),
+            hash: "8f1e428ec25b1ea88389165eeb3fbdffbf7c3267".to_owned()
+        }),
+        HashSearchWorker::new(
+            TEST_COMMIT_WITHOUT_SIGNATURE,
+            HashPrefix::new("8f1e428ec25b1ea88389165eeb3fbdffbf7c3267").unwrap(),
+        )
         .search()
     );
 }
@@ -126,7 +154,7 @@ fn search_success_without_gpg_signature_gpu_cpu_parity() {
             HashPrefix::new("8f1e428").unwrap(),
         )
         .with_capped_search_space(100)
-        .search_with_cpu(),
+        .search_with_cpus(),
         HashSearchWorker::new(
             TEST_COMMIT_WITHOUT_SIGNATURE,
             HashPrefix::new("8f1e428").unwrap(),
@@ -155,10 +183,7 @@ fn search_success_with_multi_word_prefix() {
                 "  \t                                             "
             )
             .into_bytes(),
-            hash: [
-                143, 30, 66, 142, 194, 91, 30, 168, 131, 137, 22, 94, 235, 63, 189, 255, 191, 124,
-                50, 103
-            ]
+            hash: "8f1e428ec25b1ea88389165eeb3fbdffbf7c3267".to_owned()
         }),
         HashSearchWorker::new(
             TEST_COMMIT_WITHOUT_SIGNATURE,
@@ -178,7 +203,7 @@ fn search_success_with_multi_word_prefix_gpu_cpu_parity() {
             HashPrefix::new("8f1e428ec").unwrap(),
         )
         .with_capped_search_space(100)
-        .search_with_cpu(),
+        .search_with_cpus(),
         HashSearchWorker::new(
             TEST_COMMIT_WITHOUT_SIGNATURE,
             HashPrefix::new("8f1e428ec").unwrap(),
@@ -217,10 +242,7 @@ fn search_success_with_gpg_signature() {
                 "    \t \t                                         "
             )
             .into_bytes(),
-            hash: [
-                73, 174, 143, 115, 152, 190, 169, 211, 5, 49, 116, 178, 8, 186, 106, 125, 3, 169,
-                65, 184
-            ]
+            hash: "49ae8f7398bea9d3053174b208ba6a7d03a941b8".to_owned()
         }),
         HashSearchWorker::new(
             TEST_COMMIT_WITH_SIGNATURE,

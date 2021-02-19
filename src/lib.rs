@@ -10,15 +10,20 @@ use sha1::{
     digest::{generic_array::GenericArray, BlockInput},
     Sha1,
 };
-use std::{cmp::min, convert::TryInto, ops::Range};
+#[cfg(feature = "opencl")]
+use std::convert::TryInto;
+use std::{
+    cmp::min,
+    ops::Range,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
+    thread::{spawn, JoinHandle},
+};
 
-const SHA1_BYTE_LENGTH: usize = 20;
-
-// See the comment in `ProcessedCommit::new` for the commit and padding layout.
-const DYNAMIC_PADDING_LENGTH: usize = 48;
-
-/// A worker that, when invoked, will look in a predetermined search space on a single
-/// thread, to find a modification to a specific commit that matches a specific hash prefix.
+/// A worker that, when invoked, will look in a predetermined search space to find a modification
+/// to a specific commit that matches a specific hash prefix.
 #[derive(Debug, PartialEq)]
 pub struct HashSearchWorker {
     processed_commit: ProcessedCommit,
@@ -44,8 +49,8 @@ pub struct HashMatch {
     /// to the output of `git cat-file commit HEAD`.
     pub commit: Vec<u8>,
 
-    /// The hash of the commit, when hashed in git's object encoding
-    pub hash: [u8; SHA1_BYTE_LENGTH],
+    /// The hash of the commit as a hex string, when hashed in git's object encoding
+    pub hash: String,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -67,11 +72,18 @@ impl HashSearchWorker {
     /// workload of 1 ** 48 units. As a rough approximation depending on hardware,
     /// each worker can perform about 7 million units of work per second.
     pub fn new(current_commit: &[u8], desired_prefix: HashPrefix) -> Self {
-        HashSearchWorker {
+        Self {
             processed_commit: ProcessedCommit::new(current_commit),
             desired_prefix,
-            search_space: 0..(1 << (DYNAMIC_PADDING_LENGTH as u64)),
+            search_space: 0..(1 << 48),
         }
+    }
+
+    /// Caps a worker's search space to approximately the given size.
+    pub fn with_capped_search_space(mut self, workload: u64) -> Self {
+        self.search_space =
+            self.search_space.start..min(self.search_space.end, self.search_space.start + workload);
+        self
     }
 
     /// Splits this worker into `divisor` new workers for the same commit and
@@ -79,7 +91,7 @@ impl HashSearchWorker {
     /// A worker's search space is an approximation to help with effecient threading. There is
     /// no guarantee that the resulting workers have perfectly disjoint search spaces, so in theory
     /// multiple workers could both find the same hash match despite having "split" the space.
-    pub fn split_search_space(self, divisor: u64) -> impl Iterator<Item = Self> {
+    fn split_search_space(self, divisor: u64) -> impl Iterator<Item = Self> {
         let amount_per_worker = (self.search_space.end - self.search_space.start) / divisor;
         (0..divisor).map(move |index| {
             let range_start = index * amount_per_worker + self.search_space.start;
@@ -91,19 +103,12 @@ impl HashSearchWorker {
                 // than `divisor`, so having a few extra units of work is immaterial.
                 self.search_space.end
             };
-            HashSearchWorker {
+            Self {
                 processed_commit: self.processed_commit.clone(),
                 desired_prefix: self.desired_prefix.clone(),
                 search_space: range_start..range_end,
             }
         })
-    }
-
-    /// Caps a worker's search space to approximately the given size.
-    pub fn with_capped_search_space(mut self, workload: u64) -> Self {
-        self.search_space =
-            self.search_space.start..min(self.search_space.end, self.search_space.start + workload);
-        self
     }
 
     /// Invokes the worker. The worker will return early with a hash match if it finds one,
@@ -114,30 +119,64 @@ impl HashSearchWorker {
             return self.search_with_gpu().unwrap();
         }
 
-        self.search_with_cpu()
+        self.search_with_cpus()
     }
 
     #[cfg(feature = "opencl")]
-    fn opencl_available() -> bool {
+    fn gpus_available() -> bool {
         Platform::first().is_ok()
-    }
-
-    /// Determines the worker will attempt to use a GPU for these search parameters
-    #[cfg(feature = "opencl")]
-    pub fn gpus_available() -> bool {
-        Self::opencl_available()
             && !TypeFlags(DeviceType::GPU)
                 .to_device_list(None::<Platform>)
                 .unwrap()
                 .is_empty()
     }
-    #[cfg(not(feature = "opencl"))]
-    pub fn gpus_available() -> bool {
-        false
+
+    #[allow(clippy::needless_collect)]
+    fn search_with_cpus(self) -> Option<HashMatch> {
+        let thread_count = num_cpus::get_physical();
+        let lame_duck_cancel_signal = Arc::new(AtomicBool::new(false));
+        let (shared_sender, receiver) = mpsc::channel();
+
+        let _handles = self
+            .split_search_space(thread_count as u64)
+            .map(|worker| {
+                let result_sender = shared_sender.clone();
+                let worker_cancel_signal = lame_duck_cancel_signal.clone();
+
+                spawn(move || {
+                    let _ = result_sender
+                        .send(worker.search_with_cpu_single_threaded(worker_cancel_signal));
+                })
+            })
+            .collect::<Vec<JoinHandle<()>>>();
+
+        for _ in 0..thread_count {
+            if let Some(result) = receiver.recv().unwrap() {
+                lame_duck_cancel_signal.store(true, Ordering::Relaxed);
+
+                // Lame-duck threads should halt shortly after any thread finds a match. However,
+                // we don't want to actually wait for them to halt when running in production, especially
+                // since the process will usually terminate shortly afterwards anyway. So the waiting
+                // and panic detection is debug/test-only
+                #[cfg(debug_assertions)]
+                _handles
+                    .into_iter()
+                    .map(JoinHandle::join)
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+
+                return Some(result);
+            }
+        }
+
+        None
     }
 
     #[inline(never)]
-    fn search_with_cpu(self) -> Option<HashMatch> {
+    fn search_with_cpu_single_threaded(
+        self,
+        lame_duck_cancel_signal: Arc<AtomicBool>,
+    ) -> Option<HashMatch> {
         let HashSearchWorker {
             search_space,
             desired_prefix,
@@ -145,10 +184,17 @@ impl HashSearchWorker {
         } = self;
         let mut partially_hashed_commit = processed_commit.into_partially_hashed_commit();
 
-        for padding_specifier in search_space {
-            partially_hashed_commit.scatter_padding(padding_specifier);
-            if desired_prefix.matches(&partially_hashed_commit.current_hash()) {
-                return Some(partially_hashed_commit.into_hash_match());
+        let lame_duck_check_interval = min(search_space.end - search_space.start, 1 << 20);
+        for base_padding_specifier in search_space.step_by(lame_duck_check_interval as usize) {
+            for index_in_interval in 0..lame_duck_check_interval {
+                partially_hashed_commit.scatter_padding(base_padding_specifier + index_in_interval);
+                if desired_prefix.matches(&partially_hashed_commit.current_hash()) {
+                    return Some(partially_hashed_commit.into_hash_match());
+                }
+            }
+
+            if lame_duck_cancel_signal.load(Ordering::Relaxed) {
+                break;
             }
         }
 
@@ -167,7 +213,7 @@ impl HashSearchWorker {
         const BASE_PADDING_SPECIFIER_ARG: &str = "base_padding_specifier";
 
         let num_threads = *[
-            desired_prefix.estimated_hashes_needed() * 4,
+            desired_prefix.estimated_hashes_needed().saturating_mul(4),
             search_space.end - search_space.start,
             // TODO: this value will get used a majority of the time, it should be calibrated more precisely
             1 << 22,
@@ -313,6 +359,8 @@ impl ProcessedCommit {
         //   a single newline. For GPG-signed commits, this will contain the commit message.
         let commit_split_index = Self::get_commit_split_index(original_commit);
 
+        const DYNAMIC_PADDING_LENGTH: usize = 48;
+
         // If the commit message already has spaces or tabs where we're putting padding, the most
         // likely explanation is that the user has run lucky-commit on this commit before. To prevent
         // commits from repeatedly growing after lucky-commit is run on them, omit the old padding
@@ -379,9 +427,9 @@ impl ProcessedCommit {
                 + padding_len)
                 % 64
         };
-        let prefix_length_estimate = format!("commit {}\x00", commit_length_excluding_static_padding)
-            .len()
-            + commit_length_before_static_padding;
+        let prefix_length_estimate =
+            format!("commit {}\x00", commit_length_excluding_static_padding).len()
+                + commit_length_before_static_padding;
         let initial_padding_length_guess = (64 - prefix_length_estimate % 64) % 64;
 
         let static_padding_length = if compute_alignment(initial_padding_length_guess) == 0 {
@@ -484,8 +532,7 @@ impl PartiallyHashedCommit {
     // This should be kept in sync with the OpenCL `arrange_padding_block` implementation.
     #[inline(always)]
     fn scatter_padding(&mut self, padding_specifier: u64) {
-        for (padding_chunk, padding_specifier_byte) in self.remaining_blocks[0]
-            [..DYNAMIC_PADDING_LENGTH]
+        for (padding_chunk, padding_specifier_byte) in self.remaining_blocks[0][..48]
             .chunks_exact_mut(8)
             .zip(padding_specifier.to_le_bytes().iter())
         {
@@ -532,11 +579,8 @@ impl PartiallyHashedCommit {
             hash: self
                 .current_hash()
                 .iter()
-                .flat_map(|word| word.to_be_bytes().to_vec().into_iter())
-                .collect::<Vec<_>>()
-                .as_slice()
-                .try_into()
-                .unwrap(),
+                .map(|&byte| format!("{:08x}", byte))
+                .collect::<String>(),
         }
     }
 }
@@ -545,7 +589,7 @@ impl HashPrefix {
     /// Creates a new hash prefix from a hex string, which is at most 40 characters.
     /// Returns `None` if the supplied prefix was invalid.
     pub fn new(prefix: &str) -> Option<Self> {
-        if prefix.len() > SHA1_BYTE_LENGTH * 2 {
+        if prefix.len() > 40 {
             return None;
         }
 

@@ -2,11 +2,8 @@ mod benchmark;
 
 use lucky_commit_lib::{HashMatch, HashPrefix, HashSearchWorker};
 use std::env;
-use std::io;
 use std::io::Write;
 use std::process::{exit, Command, Stdio};
-use std::sync::mpsc;
-use std::thread;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -27,114 +24,60 @@ fn main() {
 }
 
 fn print_usage_and_exit() -> ! {
-    fail_with_message("Usage: lucky_commit [commit-hash-prefix]")
-}
-
-fn fail_with_message(message: &str) -> ! {
-    eprintln!("{}", message);
+    eprintln!("Usage: lucky_commit [commit-hash-prefix]");
     exit(1)
 }
 
 fn run_lucky_commit(desired_prefix: &HashPrefix) {
-    let current_commit = run_command("git", &["cat-file", "commit", "HEAD"]);
+    let current_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
 
-    match find_match(&current_commit, desired_prefix) {
-        Some(hash_match) => {
-            create_git_commit(&hash_match)
-                .expect("Found a commit, but failed to write it to the git object database.");
-            run_command("git", &["reset", &to_hex_string(&hash_match.hash)]);
-        }
-        None => fail_with_message(
+    if let Some(HashMatch { commit, hash }) =
+        HashSearchWorker::new(&current_commit, desired_prefix.clone()).search()
+    {
+        let new_git_commit = spawn_git(
+            &["hash-object", "-t", "commit", "-w", "--stdin"],
+            Some(&commit),
+        );
+
+        assert!(
+            &new_git_commit[0..40] == hash.as_bytes(),
+            "Found a matching commit ({}), but git unexpectedly computed a different hash for it ({:?})",
+            hash,
+            new_git_commit,
+        );
+
+        spawn_git(&["reset", &hash], None);
+    } else {
+        eprintln!(
             "Sorry, failed to find a commit matching the given prefix despite searching hundreds \
-             of trillions of possible commits. Hopefully you haven't just been sitting here \
-             waiting the whole time.",
-        ),
+            of trillions of possible commits. Hopefully you haven't just been sitting here \
+            waiting the whole time."
+        );
+        exit(1)
     }
 }
 
-fn run_command(command: &str, args: &[&str]) -> Vec<u8> {
-    let output = Command::new(command)
+fn spawn_git(args: &[&str], stdin: Option<&[u8]>) -> Vec<u8> {
+    let mut child = Command::new("git")
         .args(args)
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
-        .output()
-        .unwrap_or_else(|_| {
-            panic!(
-                "Failed to spawn command `{}` with args `{:?}`",
-                command, args
-            )
-        });
+        .spawn()
+        .unwrap();
+    if let Some(input) = stdin {
+        child.stdin.as_mut().unwrap().write_all(input).unwrap();
+    }
+
+    let output = child.wait_with_output().unwrap();
 
     if !output.status.success() {
-        panic!(
-            "Command finished with non-zero exit code: {} {:?}",
-            command, args
-        );
+        panic!("git finished with non-zero exit code: {:?}", args);
     }
 
     output.stdout
-}
-
-fn find_match(current_commit: &[u8], desired_prefix: &HashPrefix) -> Option<HashMatch> {
-    let full_worker = HashSearchWorker::new(current_commit, desired_prefix.clone());
-
-    if HashSearchWorker::gpus_available() {
-        return full_worker.search();
-    }
-
-    let (shared_sender, receiver) = mpsc::channel();
-    let num_threads = num_cpus::get_physical() as u64;
-    for worker in full_worker.split_search_space(num_threads) {
-        let result_sender = shared_sender.clone();
-        thread::spawn(move || {
-            /*
-             * If an error occurs when sending, then the receiver has already received
-             * a match from another thread, so ignore the error.
-             */
-            let _ = result_sender.send(worker.search());
-        });
-    }
-
-    for _ in 0..num_threads {
-        let result = receiver.recv().unwrap();
-        if result.is_some() {
-            return result;
-        }
-    }
-
-    None
-}
-
-fn create_git_commit(search_result: &HashMatch) -> io::Result<()> {
-    let mut git_hash_object_child = Command::new("git")
-        .args(&["hash-object", "-t", "commit", "-w", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    git_hash_object_child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(&search_result.commit)?;
-    let output = git_hash_object_child.wait_with_output()?;
-
-    if !output.status.success() {
-        panic!("Found a commit, but failed to write it to the git object database.");
-    }
-    let git_hash_output =
-        String::from_utf8(output.stdout).expect("Git produced a hash containing invalid utf8?");
-    assert!(
-        git_hash_output.trim_end() == to_hex_string(&search_result.hash),
-        "Found a commit ({}), but git unexpectedly computed a different hash for it ({})",
-        to_hex_string(&search_result.hash),
-        git_hash_output.trim_end(),
-    );
-    Ok(())
-}
-
-fn to_hex_string(hash: &[u8]) -> String {
-    hash.iter()
-        .map(|&byte| format!("{:02x}", byte))
-        .collect::<String>()
 }
