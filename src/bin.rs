@@ -9,7 +9,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 2 && args[1] == "--benchmark" {
-        benchmark::run_single_core_benchmark();
+        benchmark::run_benchmark();
         return;
     }
 

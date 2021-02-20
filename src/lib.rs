@@ -579,7 +579,7 @@ impl PartiallyHashedCommit {
             hash: self
                 .current_hash()
                 .iter()
-                .map(|&byte| format!("{:08x}", byte))
+                .map(|&word| format!("{:08x}", word))
                 .collect::<String>(),
         }
     }

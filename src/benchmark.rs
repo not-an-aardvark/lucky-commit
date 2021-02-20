@@ -1,6 +1,6 @@
 use lucky_commit_lib::{HashPrefix, HashSearchWorker};
 
-pub fn run_single_core_benchmark() {
+pub fn run_benchmark() {
     // Runs a benchmark for performance testing. This does a constant hash search. This benchmark
     // should take roughly the same amount of time as running `lucky_commit` with no arguments, but
     // the performance should be much more consistent.
