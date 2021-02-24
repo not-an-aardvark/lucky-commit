@@ -336,7 +336,7 @@ impl HashSearchWorker {
 impl ProcessedCommit {
     fn new(original_commit: &[u8]) -> Self {
         // The fully padded data that gets hashed is the concatenation of all the following:
-        // * "commit " + length + "\x00", where `length` is the base-10 representation of the length
+        // * "commit " + length + "\0", where `length` is the base-10 representation of the length
         //    of everything that follows the null character. This is part of git's raw commit format.
         // * The original commit object, containing everything up to the point where padding should be
         //   added.
@@ -379,7 +379,7 @@ impl ProcessedCommit {
         let commit_length = original_commit.len() - replaceable_padding_size
             + static_padding_length
             + DYNAMIC_PADDING_LENGTH;
-        let header = format!("commit {}\x00", commit_length).into_bytes();
+        let header = format!("commit {}\0", commit_length).into_bytes();
 
         let mut commit = Vec::with_capacity(commit_length);
         commit.extend(&original_commit[..commit_split_index]);
@@ -419,7 +419,7 @@ impl ProcessedCommit {
     ) -> usize {
         let compute_alignment = |padding_len: usize| {
             (format!(
-                "commit {}\x00",
+                "commit {}\0",
                 commit_length_excluding_static_padding + padding_len
             )
             .len()
@@ -427,9 +427,9 @@ impl ProcessedCommit {
                 + padding_len)
                 % 64
         };
-        let prefix_length_estimate =
-            format!("commit {}\x00", commit_length_excluding_static_padding).len()
-                + commit_length_before_static_padding;
+        let prefix_length_estimate = format!("commit {}\0", commit_length_excluding_static_padding)
+            .len()
+            + commit_length_before_static_padding;
         let initial_padding_length_guess = (64 - prefix_length_estimate % 64) % 64;
 
         let static_padding_length = if compute_alignment(initial_padding_length_guess) == 0 {

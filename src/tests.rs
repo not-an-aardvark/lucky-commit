@@ -287,11 +287,8 @@ fn split_search_space_uneven() {
 fn processed_commit_without_gpg_signature() {
     assert_eq!(
         ProcessedCommit {
-            header: format!(
-                "commit {}\x00",
-                TEST_COMMIT_WITHOUT_SIGNATURE.len() + 61 + 48
-            )
-            .into_bytes(),
+            header: format!("commit {}\0", TEST_COMMIT_WITHOUT_SIGNATURE.len() + 61 + 48)
+                .into_bytes(),
             commit: format!(
                 "\
                     tree 0123456701234567012345670123456701234567\n\
@@ -317,8 +314,7 @@ fn processed_commit_without_gpg_signature() {
 fn processed_commit_with_gpg_signature() {
     assert_eq!(
         ProcessedCommit {
-            header: format!("commit {}\x00", TEST_COMMIT_WITH_SIGNATURE.len() + 40 + 48)
-                .into_bytes(),
+            header: format!("commit {}\0", TEST_COMMIT_WITH_SIGNATURE.len() + 40 + 48).into_bytes(),
             commit: format!(
                 "\
                     tree 0123456701234567012345670123456701234567\n\
@@ -354,7 +350,7 @@ fn processed_commit_already_padded() {
     assert_eq!(
         ProcessedCommit {
             header: format!(
-                "commit {}\x00",
+                "commit {}\0",
                 TEST_COMMIT_WITH_SIGNATURE.len() + 32 + 8 + 48
             )
             .into_bytes(),
@@ -419,7 +415,7 @@ fn process_merge_commit_with_signature() {
     assert_eq!(
         ProcessedCommit {
             header: format!(
-                "commit {}\x00",
+                "commit {}\0",
                 TEST_COMMIT_WITH_SIGNATURE_AND_MULTIPLE_PARENTS.len() + 56 + 48
             )
             .into_bytes(),
@@ -459,7 +455,7 @@ fn processed_commit_with_gpg_stuff_in_message() {
     assert_eq!(
         ProcessedCommit {
             header: format!(
-                "commit {}\x00",
+                "commit {}\0",
                 TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE.len() + 42 + 48
             )
             .into_bytes(),
@@ -488,7 +484,7 @@ fn processed_commit_with_gpg_stuff_in_message() {
 fn processed_commit_with_gpg_stuff_in_email() {
     assert_eq!(
         ProcessedCommit {
-            header: format!("commit {}\x00", TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL.len() + 7 + 48).into_bytes(),
+            header: format!("commit {}\0", TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL.len() + 7 + 48).into_bytes(),
             commit: format!(
                 "\
                     tree 0123456701234567012345670123456701234567\n\
@@ -533,7 +529,7 @@ macro_rules! pathological_commit_format_string {
 fn processed_commit_pathological_padding_alignment() {
     assert_eq!(
         ProcessedCommit {
-            header: b"commit 1063\x00".to_vec(),
+            header: b"commit 1063\0".to_vec(),
             commit: format!(
                 pathological_commit_format_string!(),
                 repeat(" ").take(105).collect::<String>(),
