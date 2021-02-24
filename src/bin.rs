@@ -1,6 +1,6 @@
 mod benchmark;
 
-use lucky_commit_lib::{HashMatch, HashPrefix, HashSearchWorker};
+use lucky_commit_lib::{hash_git_commit, HashMatch, HashPrefix, HashSearchWorker};
 use std::env;
 use std::io::Write;
 use std::process::{exit, Command, Stdio};
@@ -29,24 +29,29 @@ fn print_usage_and_exit() -> ! {
 }
 
 fn run_lucky_commit(desired_prefix: &HashPrefix) {
-    let current_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
+    let old_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
 
     if let Some(HashMatch { commit, hash }) =
-        HashSearchWorker::new(&current_commit, desired_prefix.clone()).search()
+        HashSearchWorker::new(&old_commit, desired_prefix.clone()).search()
     {
-        let new_git_commit = spawn_git(
+        let new_git_oid = spawn_git(
             &["hash-object", "-t", "commit", "-w", "--stdin"],
             Some(&commit),
         );
 
         assert!(
-            &new_git_commit[0..40] == hash.as_bytes(),
+            &new_git_oid[0..40] == hash.as_bytes(),
             "Found a matching commit ({}), but git unexpectedly computed a different hash for it ({:?})",
             hash,
-            new_git_commit,
+            new_git_oid,
         );
 
-        spawn_git(&["reset", &hash], None);
+        // Do an atomic ref update to ensure that no work gets lost, e.g. if someone forgot the tool was running
+        // and made new commits in the meantime.
+        spawn_git(
+            &["update-ref", "HEAD", &hash, &hash_git_commit(&old_commit)],
+            None,
+        );
     } else {
         eprintln!(
             "Sorry, failed to find a commit matching the given prefix despite searching hundreds \

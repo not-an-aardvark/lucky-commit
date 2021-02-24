@@ -7,7 +7,7 @@ use ocl::{
 };
 use sha1::{
     compress,
-    digest::{generic_array::GenericArray, BlockInput},
+    digest::{generic_array::GenericArray, BlockInput, Digest},
     Sha1,
 };
 #[cfg(feature = "opencl")]
@@ -568,7 +568,7 @@ impl PartiallyHashedCommit {
     }
 
     fn into_hash_match(self) -> HashMatch {
-        HashMatch {
+        let hash_match = HashMatch {
             commit: self
                 .prehashed_commit_section
                 .iter()
@@ -581,7 +581,9 @@ impl PartiallyHashedCommit {
                 .iter()
                 .map(|&word| format!("{:08x}", word))
                 .collect::<String>(),
-        }
+        };
+        debug_assert_eq!(hash_match.hash, hash_git_commit(&hash_match.commit));
+        hash_match
     }
 }
 
@@ -657,6 +659,17 @@ fn encode_big_endian_words_64(
         .as_slice()
         .try_into()
         .unwrap()
+}
+
+/// Hashes a commit object using git's object encoding, without adding padding or anything else
+pub fn hash_git_commit(commit: &[u8]) -> String {
+    Sha1::new()
+        .chain(format!("commit {}\0", commit.len()).as_bytes())
+        .chain(commit)
+        .finalize()
+        .iter()
+        .map(|&byte| format!("{:02x}", byte))
+        .collect::<String>()
 }
 
 #[cfg(test)]
