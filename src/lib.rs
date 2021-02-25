@@ -460,7 +460,7 @@ impl ProcessedCommit {
         );
         data.extend_from_slice(&(commit_range.end as u64 * 8).to_be_bytes());
 
-        assert!(data.len() % 64 == 0);
+        assert_eq!(data.len() % 64, 0);
 
         Self {
             data,

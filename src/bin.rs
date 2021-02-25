@@ -39,11 +39,10 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
             Some(&commit),
         );
 
-        assert!(
-            &new_git_oid[0..40] == hash.as_bytes(),
-            "Found a matching commit ({}), but git unexpectedly computed a different hash for it ({:?})",
-            hash,
-            new_git_oid,
+        assert_eq!(
+            hash.as_bytes(),
+            &new_git_oid[0..40],
+            "Found a matching commit, but git unexpectedly computed a different hash for it",
         );
 
         // Do an atomic ref update to ensure that no work gets lost, e.g. if someone forgot the tool was running

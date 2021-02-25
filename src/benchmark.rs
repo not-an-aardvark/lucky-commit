@@ -14,7 +14,6 @@ pub fn run_benchmark() {
     //
     // To use: run `time target/release/lucky_commit --benchmark`.
     assert_eq!(
-        None,
         HashSearchWorker::new(
             b"\
                 tree 6f4e79123e206448f80ec73b9a53e07eb0784fef\n\
@@ -25,6 +24,7 @@ pub fn run_benchmark() {
             HashPrefix::new("000000000000000000000000000000000000000").unwrap(),
         )
         .with_capped_search_space(1 << 28)
-        .search()
+        .search(),
+        None
     );
 }
