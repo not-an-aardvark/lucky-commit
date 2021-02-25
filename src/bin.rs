@@ -1,6 +1,6 @@
 mod benchmark;
 
-use lucky_commit_lib::{hash_git_commit, HashMatch, HashPrefix, HashSearchWorker};
+use lucky_commit_lib::{hash_git_commit, HashPrefix, HashSearchWorker, HashedCommit};
 use std::env;
 use std::io::Write;
 use std::process::{exit, Command, Stdio};
@@ -31,7 +31,7 @@ fn print_usage_and_exit() -> ! {
 fn run_lucky_commit(desired_prefix: &HashPrefix) {
     let old_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
 
-    if let Some(HashMatch { commit, hash }) =
+    if let Some(HashedCommit { commit, hash }) =
         HashSearchWorker::new(&old_commit, desired_prefix.clone()).search()
     {
         let new_git_oid = spawn_git(

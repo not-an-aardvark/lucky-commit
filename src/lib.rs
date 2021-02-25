@@ -7,14 +7,19 @@ use ocl::{
 };
 use sha1::{
     compress,
-    digest::{generic_array::GenericArray, BlockInput, Digest},
+    digest::{
+        generic_array::{ArrayLength, GenericArray},
+        BlockInput, Digest,
+    },
     Sha1,
 };
 #[cfg(feature = "opencl")]
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::{
     cmp::min,
+    fmt::Debug,
     ops::Range,
+    slice::from_raw_parts_mut,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
@@ -31,7 +36,11 @@ pub struct HashSearchWorker {
     search_space: Range<u64>,
 }
 
-/// Defines a target prefix for a commit hash.
+/// Defines a desired target prefix for a commit hash.
+///
+/// For example, the hash prefix "deadbeef123" corresponds to the
+/// following structure:
+///   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
 #[derive(Debug, PartialEq, Clone)]
 pub struct HashPrefix {
     /// The prefix, as split into big-endian four-byte chunks.
@@ -42,29 +51,90 @@ pub struct HashPrefix {
     mask: [u32; 5],
 }
 
-/// The result of a successful hash search
-#[derive(Debug, PartialEq)]
-pub struct HashMatch {
-    /// The git commit object that has the desired hash, in the format equivalent
-    /// to the output of `git cat-file commit HEAD`.
-    pub commit: Vec<u8>,
-
-    /// The hash of the commit as a hex string, when hashed in git's object encoding
-    pub hash: String,
-}
-
+// The fully padded data that gets hashed is the concatenation of all the following:
+// |--- GIT COMMIT HEADER (part of git's raw commit format) ---
+// | * The ASCII string "commit "
+// | * The byte-length of the entire "git commit" section below, represented as base-10 ASCII digits
+// | * A null byte (0x0)
+// |--- GIT COMMIT ---
+// | * The original git commit object that was provided as input, in git's normal commit encoding, up
+// |   to the "padding insertion point". (For commits that are not GPG-signed, the padding insertion
+// |   point is right near the end of the commit. For commits that are GPG-signed, the padding insertion
+// |   point is at the end of the signature, which is right before the commit message.) This section
+// |   contains metadata such as the author, timestamp, and parent commit.
+// | * Some number of ASCII space characters, as "static padding", such that the point after the static
+// |   padding is at a multiple-of-64-byte offset from the start of the data. Note that in very rare
+// |   pathological cases, more than 63 space characters will be needed. This is because adding static
+// |   padding also increases the length of the commit object, which is used in the git commit header
+// |   above. As a result, adding one additional padding character could increase the alignment by 2,
+// |   e.g. if the length increases from 999 to 1000.
+// |
+// | - NOTE: The length of all the data up to this point is a multiple of 64 bytes, and the length
+// |         of the all the data after this point is also a multiple of 64 bytes. For reasons that will
+// |         be explained in the declaration of `PartiallyHashedCommit`, the 64-byte blocks preceding
+// |         this point are called "static blocks", and the 64-byte blocks following this point are called
+// |         "dynamic blocks".
+// |
+// | * 48 bytes of "dynamic padding", consisting of some combination of ASCII space and tab characters.
+// |   This is the only part of the commit data that actually varies across SHA1 invocations. The ultimate
+// |   goal is to find a dynamic padding arrangement that produces the desired hash. A 48-byte length was
+// |   chosen with the goal of only needing a single dynamic block for non-GPG-signed commits.
+// | * The rest of the original commit object (from the "padding insertion point" onwards). For
+// |   non-GPG-signed commits, this will typically just be a single newline. For GPG-signed commits, this
+// |   will contain the commit message.
+// |--- SHA1 FINALIZATION PADDING (specified as part of the SHA1 algorithm) ---
+// | * The byte 0x80
+// | * Some number of null bytes (0x0), such that the point after the null bytes is at an offset of
+// |   56 (mod 64) from the start of the data
+// | * The bit-length of everything before the "finalization padding" section, represented as a big-endian
+// |   64-bit integer
 #[derive(Debug, PartialEq, Clone)]
 struct ProcessedCommit {
-    header: Vec<u8>,
-    commit: Vec<u8>,
-    dynamic_padding_start_index: usize,
+    /// The data, as specified in the comment above. The length will always be a multiple of 64 bytes.
+    data: Vec<u8>,
+    /// The location of the git commit, as an index range into `data`
+    commit_range: Range<usize>,
+    /// The number of 64-byte static blocks in the data
+    num_static_blocks: usize,
 }
 
-struct PartiallyHashedCommit {
-    prehashed_commit_section: Vec<u8>,
+/// A view of an underlying `ProcessedCommit`, with cached SHA1 state.
+///
+/// SHA1 works as follows:
+///
+/// * First, a 20-byte "state vector" is initialized to a constant.
+/// * Next, each each 64-byte block in the input is processed in sequence. The state vector after
+/// processing a block is a convoluted, deteriministic function of (a) the state vector before
+/// processing the block, and (b) the contents of the block. Processing blocks is the main performance
+/// bottleneck of lucky-commit.
+/// * The "SHA1 hash" of some data is just the contents of the state vector after processing all of
+/// the data (with SHA1 finalization padding added to the end of the data, as described in the comment
+/// about the `ProcessedCommit` format).
+///
+/// So there's a big optimization we can do here -- we have to compute a bunch of SHA1 hashes, but the
+/// only part of the data that we're changing between runs is the dynamic padding, which is very close
+/// to the end of the data. The state vector after processing all of the blocks before the dynamic
+/// padding (the "static blocks") doesn't depend at all on the contents of the dynamic padding -- it's
+/// effectively a constant for any given `ProcessedCommit`. The purpose of `PartiallyHashedCommit` is
+/// to cache that state vector, and only reprocess the "dynamic blocks" on each change to the dynamic
+/// padding. This drastically reduces the number of blocks that need to be processed, resulting in a
+/// ~5x end-to-end performance improvement for an average-sized commit.
+#[derive(Debug)]
+struct PartiallyHashedCommit<'a> {
     intermediate_sha1_state: [u32; 5],
-    remaining_blocks: Vec<GenericArray<u8, <Sha1 as BlockInput>::BlockSize>>,
-    total_commit_length: usize,
+    dynamic_blocks: &'a mut [GenericArray<u8, <Sha1 as BlockInput>::BlockSize>],
+}
+
+const SHA1_INITIAL_STATE: [u32; 5] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+
+/// The result of a successful hash search
+#[derive(Debug, PartialEq)]
+pub struct HashedCommit {
+    /// The git commit that has the desired hash
+    pub commit: Vec<u8>,
+
+    /// The hash of the commit, as a hex string
+    pub hash: String,
 }
 
 impl HashSearchWorker {
@@ -113,7 +183,7 @@ impl HashSearchWorker {
 
     /// Invokes the worker. The worker will return early with a hash match if it finds one,
     /// otherwise it will search its entire search space and return `None`.
-    pub fn search(self) -> Option<HashMatch> {
+    pub fn search(self) -> Option<HashedCommit> {
         #[cfg(feature = "opencl")]
         if Self::gpus_available() {
             return self.search_with_gpu().unwrap();
@@ -132,7 +202,7 @@ impl HashSearchWorker {
     }
 
     #[allow(clippy::needless_collect)]
-    fn search_with_cpus(self) -> Option<HashMatch> {
+    fn search_with_cpus(self) -> Option<HashedCommit> {
         let thread_count = num_cpus::get_physical();
         let lame_duck_cancel_signal = Arc::new(AtomicBool::new(false));
         let (shared_sender, receiver) = mpsc::channel();
@@ -141,7 +211,7 @@ impl HashSearchWorker {
             .split_search_space(thread_count as u64)
             .map(|worker| {
                 let result_sender = shared_sender.clone();
-                let worker_cancel_signal = lame_duck_cancel_signal.clone();
+                let worker_cancel_signal = Arc::clone(&lame_duck_cancel_signal);
 
                 spawn(move || {
                     let _ = result_sender
@@ -176,20 +246,20 @@ impl HashSearchWorker {
     fn search_with_cpu_single_threaded(
         self,
         lame_duck_cancel_signal: Arc<AtomicBool>,
-    ) -> Option<HashMatch> {
+    ) -> Option<HashedCommit> {
         let HashSearchWorker {
             search_space,
             desired_prefix,
-            processed_commit,
+            mut processed_commit,
         } = self;
-        let mut partially_hashed_commit = processed_commit.into_partially_hashed_commit();
+        let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit();
 
         let lame_duck_check_interval = min(search_space.end - search_space.start, 1 << 20);
         for base_padding_specifier in search_space.step_by(lame_duck_check_interval as usize) {
             for index_in_interval in 0..lame_duck_check_interval {
                 partially_hashed_commit.scatter_padding(base_padding_specifier + index_in_interval);
                 if desired_prefix.matches(&partially_hashed_commit.current_hash()) {
-                    return Some(partially_hashed_commit.into_hash_match());
+                    return Some(HashedCommit::new(processed_commit.commit()));
                 }
             }
 
@@ -202,13 +272,13 @@ impl HashSearchWorker {
     }
 
     #[cfg(feature = "opencl")]
-    fn search_with_gpu(self) -> ocl::Result<Option<HashMatch>> {
+    fn search_with_gpu(self) -> ocl::Result<Option<HashedCommit>> {
         let HashSearchWorker {
             search_space,
             desired_prefix,
-            processed_commit,
+            mut processed_commit,
         } = self;
-        let mut partially_hashed_commit = processed_commit.into_partially_hashed_commit();
+        let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit();
 
         const BASE_PADDING_SPECIFIER_ARG: &str = "base_padding_specifier";
 
@@ -250,15 +320,17 @@ impl HashSearchWorker {
         // (or null pointer) to an OpenCL kernel is not allowed. However, since we're
         // passing the length in separately anyway, we can just pass a buffer of length
         // 1 if there are no post-padding blocks, and it will never get used.
-        let post_padding_blocks_buffer = if partially_hashed_commit.remaining_blocks.len() > 1 {
+        let post_padding_blocks_buffer = if partially_hashed_commit.dynamic_blocks.len() > 1 {
             pro_que
                 .buffer_builder::<Uint16>()
-                .len(partially_hashed_commit.remaining_blocks.len() - 1)
+                .len(partially_hashed_commit.dynamic_blocks.len() - 1)
                 .flags(MemFlags::READ_ONLY)
                 .copy_host_slice(
-                    partially_hashed_commit.remaining_blocks[1..]
+                    partially_hashed_commit.dynamic_blocks[1..]
                         .iter()
-                        .map(|block| Uint16::from(encode_big_endian_words_64(block)))
+                        .map(|block| {
+                            encode_big_endian_words_into_ocl_vector::<[u32; 16], Uint16>(block)
+                        })
                         .collect::<Vec<_>>()
                         .as_slice(),
                 )
@@ -284,12 +356,10 @@ impl HashSearchWorker {
             .arg(&desired_prefix_mask_buffer)
             .arg(&initial_state_buffer)
             .arg_named(BASE_PADDING_SPECIFIER_ARG, &0) // filled in later
-            .arg(Uint4::from(encode_big_endian_words_16(
-                &partially_hashed_commit.remaining_blocks[0][48..]
-                    .try_into()
-                    .unwrap(),
-            )))
-            .arg(partially_hashed_commit.remaining_blocks.len() - 1)
+            .arg(encode_big_endian_words_into_ocl_vector::<[u32; 4], Uint4>(
+                &partially_hashed_commit.dynamic_blocks[0][48..],
+            ))
+            .arg(partially_hashed_commit.dynamic_blocks.len() - 1)
             .arg(&post_padding_blocks_buffer)
             .arg(&successful_match_receiver)
             .build()?;
@@ -317,15 +387,15 @@ impl HashSearchWorker {
                         commit was hashed in postprocessing, it didn't match the desired prefix. \
                         This is a bug. The most likely explanation is that the two implementations of \
                         `scatter_padding` in Rust and OpenCL (or the implementations of SHA1) have diverged \
-                        from each other.\n\ndesired prefix:\n\t{:?}\ncommit hash produced during \
-                        postprocessing:{:?}\n\tpadding specifier: {}\n\tcommit: {:?}",
+                        from each other.\n\npartial commit:\n\t{:?}\ndesired prefix:\n\t{:?}\ncommit hash \
+                        produced during postprocessing:{:?}\n\tpadding specifier: {}",
+                    partially_hashed_commit,
                     desired_prefix,
                     partially_hashed_commit.current_hash(),
                     successful_padding_specifier,
-                    String::from_utf8(partially_hashed_commit.into_hash_match().commit).unwrap_or_else(|_| "(invalid utf8)".to_owned())
                 );
 
-                return Ok(Some(partially_hashed_commit.into_hash_match()));
+                return Ok(Some(HashedCommit::new(processed_commit.commit())));
             }
         }
 
@@ -334,85 +404,117 @@ impl HashSearchWorker {
 }
 
 impl ProcessedCommit {
-    fn new(original_commit: &[u8]) -> Self {
-        // The fully padded data that gets hashed is the concatenation of all the following:
-        // * "commit " + length + "\0", where `length` is the base-10 representation of the length
-        //    of everything that follows the null character. This is part of git's raw commit format.
-        // * The original commit object, containing everything up to the point where padding should be
-        //   added.
-        // * Up to 63 space characters, as static padding. This is inserted so that the dynamic padding
-        //   that follows it will be at a multiple-of-64-byte offset. Since the performance-intensive
-        //   search involves hashing all of the 64-byte blocks starting with the dynamic padding, this
-        //   ensures that the dynamic padding is always in a single block. Note that in pathological cases,
-        //   more than 63 space characters will be added to align the dynamic padding. This is because
-        //   adding static padding also increases the length of the commit object used in the initial header,
-        //   and this could bump the alignment twice if e.g. the length increases from 999 to 1000. In these
-        //   cases, an additional 63 spaces will be added as static padding, to ensure that the start of the
-        //   dynamic padding is always aligned.
-        // * 48 bytes of dynamic padding, consisting of space and tab characters. The ultimate goal
-        //   is to find some combination of spaces and tabs that produces the desired hash. A 48-byte
-        //   length was chosen with the goal of having everything that follows the static padding
-        //   fit into one block for non-GPG-signed commits. (This allows 8 bytes for SHA1's final
-        //   length padding, as well as a couple bytes for the remainder of the commit object and
-        //   any alignment issues, while still using a multiple of 8 bytes for easily copying padding.)
-        // * The rest of the original commit object. For non-GPG-signed commits, this will just be
-        //   a single newline. For GPG-signed commits, this will contain the commit message.
-        let commit_split_index = Self::get_commit_split_index(original_commit);
+    const DYNAMIC_PADDING_LENGTH: usize = 48;
 
-        const DYNAMIC_PADDING_LENGTH: usize = 48;
+    /// See the comment above the definition of `ProcessedCommit` for details on how
+    /// the data layout.
+    fn new(original_commit: &[u8]) -> Self {
+        let padding_insertion_point = Self::get_padding_insertion_point(original_commit);
 
         // If the commit message already has spaces or tabs where we're putting padding, the most
         // likely explanation is that the user has run lucky-commit on this commit before. To prevent
         // commits from repeatedly growing after lucky-commit is run on them, omit the old padding
         // rather than piling onto it.
-        let replaceable_padding_size = original_commit[commit_split_index..]
+        let replaceable_padding_size = original_commit[padding_insertion_point..]
             .iter()
             .take_while(|&&byte| byte == b' ' || byte == b'\t')
             .count();
 
         // Use enough static padding to pad to a multiple of 64
         let static_padding_length = Self::compute_static_padding_length(
-            commit_split_index,
-            original_commit.len() - replaceable_padding_size + DYNAMIC_PADDING_LENGTH,
+            padding_insertion_point,
+            original_commit.len() - replaceable_padding_size + Self::DYNAMIC_PADDING_LENGTH,
         );
 
         let commit_length = original_commit.len() - replaceable_padding_size
             + static_padding_length
-            + DYNAMIC_PADDING_LENGTH;
-        let header = format!("commit {}\0", commit_length).into_bytes();
+            + Self::DYNAMIC_PADDING_LENGTH;
 
-        let mut commit = Vec::with_capacity(commit_length);
-        commit.extend(&original_commit[..commit_split_index]);
+        // Git commit header
+        let mut data = format!("commit {}\0", commit_length).into_bytes();
 
-        // Add static padding
-        commit.resize(commit.len() + static_padding_length, b' ');
+        let commit_range = data.len()..(data.len() + commit_length);
 
-        let dynamic_padding_start_index = commit.len();
+        // First part of commit
+        data.extend(&original_commit[..padding_insertion_point]);
 
-        // Add dynamic padding, initialized to tabs for now
-        commit.resize(commit.len() + DYNAMIC_PADDING_LENGTH, b'\t');
+        // Static padding
+        data.resize(data.len() + static_padding_length, b' ');
 
-        commit.extend(&original_commit[commit_split_index + replaceable_padding_size..]);
+        assert_eq!(data.len() % 64, 0);
+        let num_static_blocks = data.len() / 64;
 
-        assert!((header.len() + dynamic_padding_start_index) % 64 == 0);
+        // Dynamic padding, initialized to tabs for now
+        data.resize(data.len() + Self::DYNAMIC_PADDING_LENGTH, b'\t');
+
+        // Second part of commit
+        data.extend(&original_commit[padding_insertion_point + replaceable_padding_size..]);
+
+        assert_eq!(data.len(), commit_range.end);
+
+        // SHA1 finalization padding
+        data.push(0x80);
+        data.resize(
+            data.len() + (56 - data.len() as isize).rem_euclid(64) as usize,
+            0,
+        );
+        data.extend_from_slice(&(commit_range.end as u64 * 8).to_be_bytes());
+
+        assert!(data.len() % 64 == 0);
 
         Self {
-            header,
-            commit,
-            dynamic_padding_start_index,
+            data,
+            commit_range,
+            num_static_blocks,
         }
     }
 
-    // Returns the smallest nonnegative integer `static_padding_length` such that:
-    //   static_padding_length
-    // + commit_length_before_static_padding
-    // + 8
-    // + (number of digits in the base10 representation of
-    //       commit_length_excluding_static_padding + static_padding_length)
-    // is a multiple of 64.
-    //
-    // The 8 comes from the length of the word `commit`, plus a space and a null character, in
-    // git's commit hashing format.
+    /// Finds the index at which static and dynamic padding should be inserted into a commit.
+    ///
+    /// If the commit has a GPG signature (detected by the presence of "-----END PGP SIGNATURE-----"
+    /// after a line that starts with "gpgsig "), then add the padding whitespace immediately after
+    /// the text "-----END PGP SIGNATURE-----".
+    /// Otherwise, add the padding whitespace right before the end of the commit message.
+    ///
+    /// To save time hashing, we want the padding to be as close to the end of the commit
+    /// as possible. However, if a signature is present, modifying the commit message would make
+    /// the signature invalid.
+    fn get_padding_insertion_point(commit: &[u8]) -> usize {
+        let mut found_gpgsig_line = false;
+        const SIGNATURE_MARKER: &[u8] = b"-----END PGP SIGNATURE-----";
+        for index in 0..commit.len() {
+            if commit[index..].starts_with(b"\ngpgsig ") {
+                found_gpgsig_line = true;
+            } else if !found_gpgsig_line && commit[index..].starts_with(b"\n\n") {
+                // We've reached the commit message and no GPG signature has been found.
+                // Add the padding to the end of the commit.
+                break;
+            } else if found_gpgsig_line && commit[index..].starts_with(SIGNATURE_MARKER) {
+                return index + SIGNATURE_MARKER.len();
+            }
+        }
+
+        // If there's no GPG signature, trim the end of the commit and take the length.
+        // This ensures that the commit will still have a trailing newline after padding is added, and
+        // that any existing padding appears after the padding insertion point.
+        commit.len()
+            - commit
+                .iter()
+                .rev()
+                .take_while(|&&byte| byte == b' ' || byte == b'\t' || byte == b'\n')
+                .count()
+    }
+
+    /// Returns the smallest nonnegative integer `static_padding_length` such that:
+    ///   static_padding_length
+    /// + commit_length_before_static_padding
+    /// + 8
+    /// + (number of digits in the base10 representation of
+    ///       commit_length_excluding_static_padding + static_padding_length)
+    /// is a multiple of 64.
+    ///
+    /// The 8 comes from the length of the word `commit`, plus a space and a null character, in
+    /// git's commit hashing format.
     fn compute_static_padding_length(
         commit_length_before_static_padding: usize,
         commit_length_excluding_static_padding: usize,
@@ -446,93 +548,37 @@ impl ProcessedCommit {
         static_padding_length
     }
 
-    fn get_commit_split_index(commit: &[u8]) -> usize {
-        /*
-         * If the commit has a GPG signature (detected by the presence of "-----END PGP SIGNATURE-----"
-         * after a line that starts with "gpgsig "), then add the padding whitespace immediately after
-         * the text "-----END PGP SIGNATURE-----".
-         * Otherwise, add the padding whitespace right before the end of the commit message.
-         *
-         * To save time hashing, we want the padding to be as close to the end of the commit
-         * as possible. However, if a signature is present, modifying the commit message would make
-         * the signature invalid.
-         */
-        let mut found_gpgsig_line = false;
-        const SIGNATURE_MARKER: &[u8] = b"-----END PGP SIGNATURE-----";
-        for index in 0..commit.len() {
-            if commit[index..].starts_with(b"\ngpgsig ") {
-                found_gpgsig_line = true;
-            } else if !found_gpgsig_line && commit[index..].starts_with(b"\n\n") {
-                // We've reached the commit message and no GPG signature has been found.
-                // Add the padding to the end of the commit.
-                break;
-            } else if found_gpgsig_line && commit[index..].starts_with(SIGNATURE_MARKER) {
-                return index + SIGNATURE_MARKER.len();
-            }
-        }
-
-        // If there's no GPG signature, trim the end of the commit and take the length.
-        // This ensures that the commit will still have a trailing newline after padding is added, and
-        // that any existing padding appears after the split index.
-        commit.len()
-            - commit
-                .iter()
-                .rev()
-                .take_while(|&&byte| byte == b' ' || byte == b'\t' || byte == b'\n')
-                .count()
+    fn commit(&self) -> &[u8] {
+        &self.data[self.commit_range.clone()]
     }
 
-    fn into_partially_hashed_commit(mut self) -> PartiallyHashedCommit {
-        const SHA1_INITIAL_STATE: [u32; 5] =
-            [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+    fn as_partially_hashed_commit(&mut self) -> PartiallyHashedCommit {
+        let (static_blocks, dynamic_blocks) =
+            as_chunks_mut::<u8, <Sha1 as BlockInput>::BlockSize>(&mut self.data[..])
+                .0
+                .split_at_mut(self.num_static_blocks);
 
-        let prehashed_commit_section = self.commit[..self.dynamic_padding_start_index].to_vec();
-
-        // SHA1 works by splitting the input data into 64-byte blocks. Each 64-byte block
-        // can be processed in sequence. Since we're adding whitespace near the end of a
-        // commit object, the first few 64-byte blocks of the commit will always be the same.
-        // Instead of reprocessing those blocks every time, we can just cache the SHA1 state
-        // after processing those blocks, and only process the new padding each time.
         let mut intermediate_sha1_state = SHA1_INITIAL_STATE;
-        compress(
-            &mut intermediate_sha1_state,
-            self.header
-                .iter()
-                .chain(prehashed_commit_section.iter())
-                .copied()
-                .collect::<Vec<_>>()
-                .chunks_exact(64)
-                .map(GenericArray::clone_from_slice)
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
-
-        let total_commit_length = self.commit.len();
-        self.commit.push(0x80);
-        while self.commit[self.dynamic_padding_start_index..].len() % 64 != 56 {
-            self.commit.push(0);
-        }
-        self.commit.extend_from_slice(
-            &((self.header.len() + total_commit_length) as u64 * 8).to_be_bytes(),
-        );
+        compress(&mut intermediate_sha1_state, static_blocks);
 
         PartiallyHashedCommit {
-            prehashed_commit_section,
             intermediate_sha1_state,
-            total_commit_length,
-            remaining_blocks: self.commit[self.dynamic_padding_start_index..]
-                .chunks_exact(64)
-                .map(GenericArray::clone_from_slice)
-                .collect(),
+            dynamic_blocks,
         }
     }
 }
 
-impl PartiallyHashedCommit {
+impl<'a> PartiallyHashedCommit<'a> {
+    #[inline(always)]
+    fn dynamic_padding_mut(&mut self) -> &mut [u8] {
+        &mut self.dynamic_blocks[0][..48]
+    }
+
     // This should be kept in sync with the OpenCL `arrange_padding_block` implementation.
     #[inline(always)]
     fn scatter_padding(&mut self, padding_specifier: u64) {
-        for (padding_chunk, padding_specifier_byte) in self.remaining_blocks[0][..48]
+        for (padding_chunk, padding_specifier_byte) in self
+            .dynamic_padding_mut()
             .chunks_exact_mut(8)
             .zip(padding_specifier.to_le_bytes().iter())
         {
@@ -540,50 +586,15 @@ impl PartiallyHashedCommit {
             // The 48-byte dynamic padding string is mapped from the 48-bit specifier such that
             // each byte of padding is a [space/tab] if the corresponding little-endian bit of
             // the specifier is a [0/1], respectively.
-            padding_chunk.copy_from_slice(&Self::PADDING_CHUNKS[*padding_specifier_byte as usize]);
+            padding_chunk.copy_from_slice(&PADDING_CHUNKS[*padding_specifier_byte as usize]);
         }
     }
-
-    // The 256 unique strings of length 8 which contain only ' ' and '\t'.
-    // These are computed statically in advance to allow them to be copied quickly.
-    const PADDING_CHUNKS: [[u8; 8]; 256] = {
-        let mut padding_chunks = [[0; 8]; 256];
-        let mut i = 0;
-        while i < 256 {
-            let mut j = 0;
-            while j < 8 {
-                padding_chunks[i][j] = if i & (0x80 >> j) == 0 { b' ' } else { b'\t' };
-                j += 1;
-            }
-            i += 1;
-        }
-        padding_chunks
-    };
 
     #[inline(always)]
     fn current_hash(&self) -> [u32; 5] {
         let mut sha1_hash = self.intermediate_sha1_state;
-        compress(&mut sha1_hash, &self.remaining_blocks[..]);
+        compress(&mut sha1_hash, self.dynamic_blocks);
         sha1_hash
-    }
-
-    fn into_hash_match(self) -> HashMatch {
-        let hash_match = HashMatch {
-            commit: self
-                .prehashed_commit_section
-                .iter()
-                .chain(self.remaining_blocks.iter().flat_map(|block| block.iter()))
-                .take(self.total_commit_length)
-                .copied()
-                .collect(),
-            hash: self
-                .current_hash()
-                .iter()
-                .map(|&word| format!("{:08x}", word))
-                .collect::<String>(),
-        };
-        debug_assert_eq!(hash_match.hash, hash_git_commit(&hash_match.commit));
-        hash_match
     }
 }
 
@@ -638,27 +649,32 @@ impl Default for HashPrefix {
     }
 }
 
-// Maybe soon const generics will finally reach stable, and this function
-// won't need to be implemented twice.
-#[cfg(feature = "opencl")]
-fn encode_big_endian_words_16(data: &[u8; 16]) -> [u32; 4] {
-    data.chunks(4)
-        .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
-        .collect::<Vec<_>>()
-        .as_slice()
-        .try_into()
-        .unwrap()
+impl HashedCommit {
+    fn new(commit: &[u8]) -> Self {
+        Self {
+            commit: commit.to_vec(),
+            hash: hash_git_commit(commit),
+        }
+    }
 }
+
 #[cfg(feature = "opencl")]
-fn encode_big_endian_words_64(
-    data: &GenericArray<u8, <Sha1 as BlockInput>::BlockSize>,
-) -> [u32; 16] {
-    data.chunks(4)
-        .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
-        .collect::<Vec<_>>()
-        .as_slice()
-        .try_into()
-        .unwrap()
+/// This definition is a bit more complicated than necessary due to the lack of support
+/// for const generics. `T` is a [u32; N] array of the correct length here, and `U` is
+/// an OpenCL vector primitive containing the same amount of data.
+fn encode_big_endian_words_into_ocl_vector<T: TryFrom<Vec<u32>>, U: From<T>>(data: &[u8]) -> U
+where
+    T::Error: Debug,
+{
+    assert_eq!(data.len() % 4, 0);
+
+    U::from(
+        data.chunks(4)
+            .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap(),
+    )
 }
 
 /// Hashes a commit object using git's object encoding, without adding padding or anything else
@@ -671,6 +687,37 @@ pub fn hash_git_commit(commit: &[u8]) -> String {
         .map(|&byte| format!("{:02x}", byte))
         .collect::<String>()
 }
+
+// This is a modified implementation of std::slice::as_chunks_mut. It's copied because the
+// standard library function is not yet stable (and neither are const generics).
+fn as_chunks_mut<T, N: ArrayLength<T>>(slice: &mut [T]) -> (&mut [GenericArray<T, N>], &mut [T]) {
+    let chunk_size = N::to_usize();
+    assert_ne!(chunk_size, 0);
+    let len = slice.len() / chunk_size;
+    let (multiple_of_n, remainder) = slice.split_at_mut(len * chunk_size);
+    let array_slice =
+
+        // SAFETY: We cast a slice of `len * N` elements into
+        // a slice of `len` many `N` elements chunks.
+        unsafe { from_raw_parts_mut(multiple_of_n.as_mut_ptr().cast(), len) };
+    (array_slice, remainder)
+}
+
+// The 256 unique strings of length 8 which contain only ' ' and '\t'.
+// These are computed statically in advance to allow them to be copied quickly.
+static PADDING_CHUNKS: [[u8; 8]; 256] = {
+    let mut padding_chunks = [[0; 8]; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut j = 0;
+        while j < 8 {
+            padding_chunks[i][j] = if i & (0x80 >> j) == 0 { b' ' } else { b'\t' };
+            j += 1;
+        }
+        i += 1;
+    }
+    padding_chunks
+};
 
 #[cfg(test)]
 mod tests;

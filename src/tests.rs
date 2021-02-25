@@ -88,7 +88,7 @@ fn search_failure() {
 #[test]
 fn search_success_without_gpg_signature() {
     assert_eq!(
-        Some(HashMatch {
+        Some(HashedCommit {
             commit: format!(
                 "\
                     tree 0123456701234567012345670123456701234567\n\
@@ -120,7 +120,7 @@ fn search_success_with_full_prefix_and_no_capped_space() {
     // signalling (where a single thread  finds a match, but the other threads don't realize that they
     // were supposed to stop searching)
     assert_eq!(
-        Some(HashMatch {
+        Some(HashedCommit {
             commit: format!(
                 "\
                     tree 0123456701234567012345670123456701234567\n\
@@ -168,7 +168,7 @@ fn search_success_without_gpg_signature_gpu_cpu_parity() {
 #[test]
 fn search_success_with_multi_word_prefix() {
     assert_eq!(
-        Some(HashMatch {
+        Some(HashedCommit {
             commit: format!(
                 "\
                     tree 0123456701234567012345670123456701234567\n\
@@ -217,7 +217,7 @@ fn search_success_with_multi_word_prefix_gpu_cpu_parity() {
 #[test]
 fn search_success_with_gpg_signature() {
     assert_eq!(
-        Some(HashMatch {
+        Some(HashedCommit {
             commit: format!(
                 "\
                     tree 0123456701234567012345670123456701234567\n\
@@ -286,101 +286,84 @@ fn split_search_space_uneven() {
 #[test]
 fn processed_commit_without_gpg_signature() {
     assert_eq!(
-        ProcessedCommit {
-            header: format!("commit {}\0", TEST_COMMIT_WITHOUT_SIGNATURE.len() + 61 + 48)
-                .into_bytes(),
-            commit: format!(
-                "\
-                    tree 0123456701234567012345670123456701234567\n\
-                    parent 7654321076543210765432107654321076543210\n\
-                    author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                    \n\
-                    Do a thing\n\
-                    \n\
-                    Makes some changes to the foo feature\
-                    {}{}\n",
-                repeat(" ").take(61).collect::<String>(),
-                repeat("\t").take(48).collect::<String>()
-            )
-            .into_bytes(),
-            dynamic_padding_start_index: 309
-        },
-        ProcessedCommit::new(TEST_COMMIT_WITHOUT_SIGNATURE)
+        format!(
+            "\
+                tree 0123456701234567012345670123456701234567\n\
+                parent 7654321076543210765432107654321076543210\n\
+                author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                \n\
+                Do a thing\n\
+                \n\
+                Makes some changes to the foo feature\
+                {}{}\n",
+            repeat(" ").take(61).collect::<String>(),
+            repeat("\t").take(48).collect::<String>()
+        )
+        .into_bytes(),
+        ProcessedCommit::new(TEST_COMMIT_WITHOUT_SIGNATURE).commit()
     )
 }
 
 #[test]
 fn processed_commit_with_gpg_signature() {
     assert_eq!(
-        ProcessedCommit {
-            header: format!("commit {}\0", TEST_COMMIT_WITH_SIGNATURE.len() + 40 + 48).into_bytes(),
-            commit: format!(
-                "\
-                    tree 0123456701234567012345670123456701234567\n\
-                    parent 7654321076543210765432107654321076543210\n\
-                    author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                    gpgsig -----BEGIN PGP SIGNATURE-----\n\
-                    \n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    =AAAA\n\
-                    -----END PGP SIGNATURE-----{}{}\n\
-                    \n\
-                    Do a thing\n\
-                    \n\
-                    Makes some changes to the foo feature\n",
-                repeat(" ").take(40).collect::<String>(),
-                repeat("\t").take(48).collect::<String>()
-            )
-            .into_bytes(),
-            dynamic_padding_start_index: 693
-        },
-        ProcessedCommit::new(TEST_COMMIT_WITH_SIGNATURE)
+        format!(
+            "\
+                tree 0123456701234567012345670123456701234567\n\
+                parent 7654321076543210765432107654321076543210\n\
+                author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                gpgsig -----BEGIN PGP SIGNATURE-----\n\
+                \n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                =AAAA\n\
+                -----END PGP SIGNATURE-----{}{}\n\
+                \n\
+                Do a thing\n\
+                \n\
+                Makes some changes to the foo feature\n",
+            repeat(" ").take(40).collect::<String>(),
+            repeat("\t").take(48).collect::<String>()
+        )
+        .into_bytes(),
+        ProcessedCommit::new(TEST_COMMIT_WITH_SIGNATURE).commit()
     );
 }
 
 #[test]
 fn processed_commit_already_padded() {
     assert_eq!(
-        ProcessedCommit {
-            header: format!(
-                "commit {}\0",
-                TEST_COMMIT_WITH_SIGNATURE.len() + 32 + 8 + 48
-            )
-            .into_bytes(),
-            commit: format!(
-                "\
-                    tree 0123456701234567012345670123456701234567\n\
-                    parent 7654321076543210765432107654321076543210\n\
-                    author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                    gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
-                    \n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    =AAAA\n\
-                    -----END PGP SIGNATURE-----{}{}\n\
-                    \n\
-                    Do a thing\n\
-                    \n\
-                    Makes some changes to the foo feature\n",
-                repeat("\t").take(32).collect::<String>(),
-                repeat(" ").take(8).collect::<String>(),
-                repeat("\t").take(48).collect::<String>()
-            )
-            .into_bytes(),
-            dynamic_padding_start_index: 693
-        },
+        format!(
+            "\
+                tree 0123456701234567012345670123456701234567\n\
+                parent 7654321076543210765432107654321076543210\n\
+                author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                gpgsig {}-----BEGIN PGP SIGNATURE-----\n\
+                \n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                =AAAA\n\
+                -----END PGP SIGNATURE-----{}{}\n\
+                \n\
+                Do a thing\n\
+                \n\
+                Makes some changes to the foo feature\n",
+            repeat("\t").take(32).collect::<String>(),
+            repeat(" ").take(8).collect::<String>(),
+            repeat("\t").take(48).collect::<String>()
+        )
+        .into_bytes(),
         ProcessedCommit::new(
             &format!(
                 "\
@@ -407,99 +390,80 @@ fn processed_commit_already_padded() {
             )
             .into_bytes()
         )
+        .commit()
     )
 }
 
 #[test]
 fn process_merge_commit_with_signature() {
     assert_eq!(
-        ProcessedCommit {
-            header: format!(
-                "commit {}\0",
-                TEST_COMMIT_WITH_SIGNATURE_AND_MULTIPLE_PARENTS.len() + 56 + 48
-            )
-            .into_bytes(),
-            commit: format!(
-                "\
-                    tree 0123456701234567012345670123456701234567\n\
-                    parent 7654321076543210765432107654321076543210\n\
-                    parent 2468246824682468246824682468246824682468\n\
-                    author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                    gpgsig -----BEGIN PGP SIGNATURE-----\n\
-                    \n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-                    =AAAA\n\
-                    -----END PGP SIGNATURE-----{}{}\n\
-                    \n\
-                    Do a thing\n\
-                    \n\
-                    Makes some changes to the foo feature\n",
-                repeat(" ").take(56).collect::<String>(),
-                repeat("\t").take(48).collect::<String>()
-            )
-            .into_bytes(),
-            dynamic_padding_start_index: 757
-        },
-        ProcessedCommit::new(TEST_COMMIT_WITH_SIGNATURE_AND_MULTIPLE_PARENTS)
+        format!(
+            "\
+                tree 0123456701234567012345670123456701234567\n\
+                parent 7654321076543210765432107654321076543210\n\
+                parent 2468246824682468246824682468246824682468\n\
+                author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                gpgsig -----BEGIN PGP SIGNATURE-----\n\
+                \n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
+                =AAAA\n\
+                -----END PGP SIGNATURE-----{}{}\n\
+                \n\
+                Do a thing\n\
+                \n\
+                Makes some changes to the foo feature\n",
+            repeat(" ").take(56).collect::<String>(),
+            repeat("\t").take(48).collect::<String>()
+        )
+        .into_bytes(),
+        ProcessedCommit::new(TEST_COMMIT_WITH_SIGNATURE_AND_MULTIPLE_PARENTS).commit()
     );
 }
 
 #[test]
 fn processed_commit_with_gpg_stuff_in_message() {
     assert_eq!(
-        ProcessedCommit {
-            header: format!(
-                "commit {}\0",
-                TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE.len() + 42 + 48
-            )
-            .into_bytes(),
-            commit: format!(
-                "\
-                    tree 0123456701234567012345670123456701234567\n\
-                    parent 7654321076543210765432107654321076543210\n\
-                    author Foo Bár <foo@example.com> 1513980859 -0500\n\
-                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                    \n\
-                    For no particular reason, this commit message looks like a GPG signature.\n\
-                    gpgsig -----END PGP SIGNATURE-----\n\
-                    \n\
-                    So anyway, that's fun.{}{}\n",
-                repeat(" ").take(42).collect::<String>(),
-                repeat("\t").take(48).collect::<String>()
-            )
-            .into_bytes(),
-            dynamic_padding_start_index: 373
-        },
-        ProcessedCommit::new(TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE)
+        format!(
+            "\
+                tree 0123456701234567012345670123456701234567\n\
+                parent 7654321076543210765432107654321076543210\n\
+                author Foo Bár <foo@example.com> 1513980859 -0500\n\
+                committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                \n\
+                For no particular reason, this commit message looks like a GPG signature.\n\
+                gpgsig -----END PGP SIGNATURE-----\n\
+                \n\
+                So anyway, that's fun.{}{}\n",
+            repeat(" ").take(42).collect::<String>(),
+            repeat("\t").take(48).collect::<String>()
+        )
+        .into_bytes(),
+        ProcessedCommit::new(TEST_COMMIT_WITH_GPG_STUFF_IN_MESSAGE).commit()
     )
 }
 
 #[test]
 fn processed_commit_with_gpg_stuff_in_email() {
     assert_eq!(
-        ProcessedCommit {
-            header: format!("commit {}\0", TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL.len() + 7 + 48).into_bytes(),
-            commit: format!(
-                "\
-                    tree 0123456701234567012345670123456701234567\n\
-                    parent 7654321076543210765432107654321076543210\n\
-                    author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
-                    committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-                    \n\
-                    For no particular reason, the commit author's email has a GPG signature marker.{}{}\n",
-                repeat(" ").take(7).collect::<String>(),
-                repeat("\t").take(48).collect::<String>()
-            )
-            .into_bytes(),
-            dynamic_padding_start_index: 309
-        },
-        ProcessedCommit::new(TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL)
+        format!(
+            "\
+                tree 0123456701234567012345670123456701234567\n\
+                parent 7654321076543210765432107654321076543210\n\
+                author Foo Bár <-----END PGP SIGNATURE-----@example.com> 1513980859 -0500\n\
+                committer Baz Qux <baz@example.com> 1513980898 -0500\n\
+                \n\
+                For no particular reason, the commit author's email has a GPG signature marker.{}{}\n",
+            repeat(" ").take(7).collect::<String>(),
+            repeat("\t").take(48).collect::<String>()
+        )
+        .into_bytes(),
+        ProcessedCommit::new(TEST_COMMIT_WITH_GPG_STUFF_IN_EMAIL).commit()
     )
 }
 
@@ -528,17 +492,14 @@ macro_rules! pathological_commit_format_string {
 #[test]
 fn processed_commit_pathological_padding_alignment() {
     assert_eq!(
-        ProcessedCommit {
-            header: b"commit 1063\0".to_vec(),
-            commit: format!(
-                pathological_commit_format_string!(),
-                repeat(" ").take(105).collect::<String>(),
-                repeat("\t").take(48).collect::<String>(),
-            )
-            .into_bytes(),
-            dynamic_padding_start_index: 1012,
-        },
+        format!(
+            pathological_commit_format_string!(),
+            repeat(" ").take(105).collect::<String>(),
+            repeat("\t").take(48).collect::<String>(),
+        )
+        .into_bytes(),
         ProcessedCommit::new(&format!(pathological_commit_format_string!(), "", "").into_bytes())
+            .commit()
     )
 }
 
