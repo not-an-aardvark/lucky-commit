@@ -148,6 +148,12 @@ fn search_success_with_full_prefix_and_no_capped_space() {
 #[cfg(feature = "opencl")]
 #[test]
 fn search_success_without_gpg_signature_gpu_cpu_parity() {
+    assert!(
+        HashSearchWorker::gpus_available(),
+        "\
+            Cannot run test because no GPUs are available. Consider using \
+            `cargo test --no-default-features` to ignore tests that require GPUs."
+    );
     assert_eq!(
         HashSearchWorker::new(
             TEST_COMMIT_WITHOUT_SIGNATURE,
@@ -197,6 +203,12 @@ fn search_success_with_multi_word_prefix() {
 #[cfg(feature = "opencl")]
 #[test]
 fn search_success_with_multi_word_prefix_gpu_cpu_parity() {
+    assert!(
+        HashSearchWorker::gpus_available(),
+        "\
+            Cannot run test because no GPUs are available. Consider using \
+            `cargo test --no-default-features` to ignore tests that require GPUs."
+    );
     assert_eq!(
         HashSearchWorker::new(
             TEST_COMMIT_WITHOUT_SIGNATURE,
