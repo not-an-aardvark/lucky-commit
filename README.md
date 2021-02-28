@@ -33,7 +33,7 @@ $ git log
 ## Installation
 
 * Make sure you have `rustc` and `cargo` installed. Installation instructions can be found [here](https://doc.rust-lang.org/book/ch01-01-installation.html).
-* Run `cargo install lucky_commit`
+* Run `cargo install lucky_commit --locked`
 
 Depending on your `cargo` setup, this will usually add the binary to your `$PATH`. You can then use it by running `lucky_commit`.
 
@@ -51,7 +51,7 @@ This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in th
 
 By default, `lucky-commit` links with your system's OpenCL headers and runs on your GPUs. This makes it significantly faster. However, if you don't have any GPUs, or you encounter linker errors that you don't feel like dealing with, you can compile `lucky-commit` without OpenCL to make it fall back to a multithreaded CPU implementation. (This is about 10x slower on my laptop, although the degree of slowdown will vary significantly depending on your machine specs.)
 
-To compile `lucky-commit` without OpenCL, add the flag `--no-default-features` to your install or build command (i.e. `cargo install lucky_commit --no-default-features` or `cargo build --release --no-default-features`).
+To compile `lucky-commit` without OpenCL, add the flag `--no-default-features` to your install or build command (i.e. `cargo install lucky_commit --locked --no-default-features` or `cargo build --release --no-default-features`).
 
 ### Installing an older version
 
