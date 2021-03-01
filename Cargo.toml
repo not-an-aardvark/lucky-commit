@@ -24,3 +24,6 @@ path = "src/bin.rs"
 num_cpus = "1.0"
 "sha-1" = { version = "0.9", "default-features" = false, features = ["asm", "compress"] }
 ocl = { version = "0.19", optional = true }
+
+[profile.release]
+lto = true
