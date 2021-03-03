@@ -292,6 +292,8 @@ impl HashSearchWorker {
         .min()
         .unwrap() as usize;
 
+        assert!(num_threads <= u32::MAX as usize);
+
         let pro_que = ProQue::builder()
             .src(include_str!("sha1_prefix_matcher.cl"))
             .dims(num_threads)
@@ -343,9 +345,9 @@ impl HashSearchWorker {
                 .copy_host_slice(&[Uint16::zero()])
                 .build()?
         };
-        let mut successful_match_receiver_host_handle = [u64::MAX];
+        let mut successful_match_receiver_host_handle = [u32::MAX];
         let successful_match_receiver = pro_que
-            .buffer_builder::<u64>()
+            .buffer_builder::<u32>()
             .len(1)
             .flags(MemFlags::WRITE_ONLY)
             .copy_host_slice(&successful_match_receiver_host_handle)
@@ -376,8 +378,9 @@ impl HashSearchWorker {
                 .read(&mut successful_match_receiver_host_handle[..])
                 .enq()?;
 
-            if successful_match_receiver_host_handle[0] != u64::MAX {
-                let successful_padding_specifier = successful_match_receiver_host_handle[0];
+            if successful_match_receiver_host_handle[0] != u32::MAX {
+                let successful_padding_specifier =
+                    base_padding_specifier + (successful_match_receiver_host_handle[0] as u64);
                 partially_hashed_commit.scatter_padding(successful_padding_specifier);
 
                 assert!(

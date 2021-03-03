@@ -16,14 +16,14 @@ __kernel void scatter_padding_and_find_match(
     uint4 padding_block_ending,
     size_t num_post_padding_blocks,
     __global uint16* post_padding_blocks,
-    __global ulong* successful_match_receiver
+    __global uint* successful_match_receiver
 ) {
     uint finalized_hash[5] = {h[0], h[1], h[2], h[3], h[4]};
     ulong padding_specifier = base_padding_specifier + get_global_id(0);
 
     sha1_compress(finalized_hash, arrange_padding_block(padding_specifier, padding_block_ending));
 
-    for (int i = 0; i < num_post_padding_blocks; i++) {
+    for (size_t i = 0; i < num_post_padding_blocks; i++) {
         sha1_compress(finalized_hash, post_padding_blocks[i]);
     }
 
@@ -34,7 +34,7 @@ __kernel void scatter_padding_and_find_match(
         (finalized_hash[3] & desired_prefix_mask[3]) == desired_prefix_data[3] &&
         (finalized_hash[4] & desired_prefix_mask[4]) == desired_prefix_data[4]
     ) {
-        *successful_match_receiver = padding_specifier;
+        atomic_cmpxchg(successful_match_receiver, UINT_MAX, get_global_id(0));
     }
 }
 
