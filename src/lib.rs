@@ -580,7 +580,7 @@ impl<'a> PartiallyHashedCommit<'a> {
     // This should be kept in sync with the OpenCL `arrange_padding_block` implementation.
     #[inline(always)]
     fn scatter_padding(&mut self, padding_specifier: u64) {
-        for (padding_chunk, padding_specifier_byte) in self
+        for (padding_chunk, &padding_specifier_byte) in self
             .dynamic_padding_mut()
             .chunks_exact_mut(8)
             .zip(padding_specifier.to_le_bytes().iter())
@@ -589,7 +589,7 @@ impl<'a> PartiallyHashedCommit<'a> {
             // The 48-byte dynamic padding string is mapped from the 48-bit specifier such that
             // each byte of padding is a [space/tab] if the corresponding little-endian bit of
             // the specifier is a [0/1], respectively.
-            padding_chunk.copy_from_slice(&PADDING_CHUNKS[*padding_specifier_byte as usize]);
+            padding_chunk.copy_from_slice(&PADDING_CHUNKS[padding_specifier_byte as usize]);
         }
     }
 
@@ -635,7 +635,7 @@ impl HashPrefix {
     fn matches(&self, hash: &[u32; 5]) -> bool {
         hash.iter()
             .zip(&self.mask)
-            .map(|(hash_word, &mask_word)| hash_word & mask_word)
+            .map(|(&hash_word, &mask_word)| hash_word & mask_word)
             .zip(&self.data)
             .all(|(masked_hash_word, &desired_prefix_word)| masked_hash_word == desired_prefix_word)
     }

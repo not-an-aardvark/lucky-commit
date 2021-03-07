@@ -1,9 +1,11 @@
 mod benchmark;
 
 use lucky_commit::{hash_git_commit, HashPrefix, HashSearchWorker, HashedCommit};
-use std::env;
-use std::io::Write;
-use std::process::{exit, Command, Stdio};
+use std::{
+    env,
+    io::Write,
+    process::{exit, Command, Stdio},
+};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
