@@ -8,7 +8,7 @@ repository = "https://github.com/not-an-aardvark/lucky-commit"
 license = "MIT"
 
 [lib]
-name = "lucky_commit_lib"
+name = "lucky_commit"
 path = "src/lib.rs"
 
 [features]

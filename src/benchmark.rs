@@ -1,4 +1,4 @@
-use lucky_commit_lib::{HashPrefix, HashSearchWorker};
+use lucky_commit::{HashPrefix, HashSearchWorker};
 
 pub fn run_benchmark() {
     // Runs a benchmark for performance testing. This does a constant hash search. This benchmark

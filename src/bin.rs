@@ -1,6 +1,6 @@
 mod benchmark;
 
-use lucky_commit_lib::{hash_git_commit, HashPrefix, HashSearchWorker, HashedCommit};
+use lucky_commit::{hash_git_commit, HashPrefix, HashSearchWorker, HashedCommit};
 use std::env;
 use std::io::Write;
 use std::process::{exit, Command, Stdio};
