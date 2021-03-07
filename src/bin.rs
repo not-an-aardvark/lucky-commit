@@ -48,7 +48,14 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
         // Do an atomic ref update to ensure that no work gets lost, e.g. if someone forgot the tool was running
         // and made new commits in the meantime.
         spawn_git(
-            &["update-ref", "HEAD", &hash, &hash_git_commit(&old_commit)],
+            &[
+                "update-ref",
+                "-m",
+                "amend with lucky_commit",
+                "HEAD",
+                &hash,
+                &hash_git_commit(&old_commit),
+            ],
             None,
         );
     } else {
