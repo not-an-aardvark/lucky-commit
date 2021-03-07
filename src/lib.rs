@@ -2,7 +2,7 @@
 use ocl::{
     builders::DeviceSpecifier::TypeFlags,
     flags::{DeviceType, MemFlags},
-    prm::{Uint16, Uint4},
+    prm::Uint16,
     Buffer, Context, Kernel, Platform, Program, Queue,
 };
 use sha1::{
@@ -14,7 +14,7 @@ use sha1::{
     Sha1,
 };
 #[cfg(feature = "opencl")]
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::{
     cmp::Ord,
     fmt::Debug,
@@ -283,21 +283,20 @@ impl HashSearchWorker {
         let num_threads = *[
             desired_prefix.estimated_hashes_needed().saturating_mul(4),
             search_space.end - search_space.start,
-            // TODO: this value will get used a majority of the time, it should be calibrated more precisely
             1 << 22,
         ]
         .iter()
         .min()
         .unwrap() as usize;
 
-        assert!(num_threads <= u32::MAX as usize);
+        assert!(num_threads < u32::MAX as usize);
 
         let devices = TypeFlags(DeviceType::GPU).to_device_list(Some(Platform::default()))?[0];
         let context = Context::builder().devices(devices).build()?;
         let queue = Queue::new(&context, devices, None)?;
 
         let mut successful_match_receiver_host_handle = [u32::MAX];
-        let successful_match_receiver = Buffer::<u32>::builder()
+        let successful_match_receiver = Buffer::builder()
             .queue(queue.clone())
             .len(1)
             .flags(MemFlags::WRITE_ONLY)
@@ -312,10 +311,8 @@ impl HashSearchWorker {
                     ])
                     .build(&context)?,
             )
-            .queue(queue.clone())
-            .global_work_size(num_threads)
             .arg(
-                &Buffer::<u32>::builder()
+                &Buffer::builder()
                     .queue(queue.clone())
                     .len(desired_prefix.data.len())
                     .flags(MemFlags::READ_ONLY)
@@ -323,7 +320,7 @@ impl HashSearchWorker {
                     .build()?,
             )
             .arg(
-                &Buffer::<u32>::builder()
+                &Buffer::builder()
                     .queue(queue.clone())
                     .len(desired_prefix.mask.len())
                     .flags(MemFlags::READ_ONLY)
@@ -331,42 +328,31 @@ impl HashSearchWorker {
                     .build()?,
             )
             .arg(
-                &Buffer::<u32>::builder()
+                &Buffer::builder()
                     .queue(queue.clone())
                     .len(partially_hashed_commit.intermediate_sha1_state.len())
                     .flags(MemFlags::READ_ONLY)
                     .copy_host_slice(&partially_hashed_commit.intermediate_sha1_state)
                     .build()?,
             )
-            .arg(encode_big_endian_words_into_ocl_vector::<[u32; 4], Uint4>(
-                &partially_hashed_commit.dynamic_blocks[0][48..],
-            ))
-            .arg(partially_hashed_commit.dynamic_blocks.len() - 1)
             .arg(
-                &Buffer::<Uint16>::builder()
-                    .queue(queue)
+                &Buffer::builder()
+                    .queue(queue.clone())
+                    .len(partially_hashed_commit.dynamic_blocks.len())
                     .flags(MemFlags::READ_ONLY)
-                    // This is a slight hack -- it seems like passing a zero-length buffer
-                    // (or null pointer) to an OpenCL kernel is not allowed. However, since we're
-                    // passing the length in separately anyway, we can just pass a buffer of length
-                    // 1 if there are no post-padding blocks, and it will never get used.
-                    .len(Ord::max(
-                        partially_hashed_commit.dynamic_blocks.len() - 1,
-                        1,
-                    ))
-                    .copy_host_slice(&if partially_hashed_commit.dynamic_blocks.len() > 1 {
-                        partially_hashed_commit.dynamic_blocks[1..]
+                    .copy_host_slice(
+                        &partially_hashed_commit
+                            .dynamic_blocks
                             .iter()
-                            .map(|block| {
-                                encode_big_endian_words_into_ocl_vector::<[u32; 16], Uint16>(block)
-                            })
-                            .collect::<Vec<_>>()
-                    } else {
-                        vec![Uint16::zero()]
-                    })
+                            .map(|&block| encode_into_opencl_vector(block))
+                            .collect::<Vec<_>>(),
+                    )
                     .build()?,
             )
+            .arg(partially_hashed_commit.dynamic_blocks.len())
             .arg(&successful_match_receiver)
+            .queue(queue)
+            .global_work_size(num_threads)
             .build()?;
 
         for base_padding_specifier in search_space.step_by(num_threads) {
@@ -665,22 +651,16 @@ impl HashedCommit {
 }
 
 #[cfg(feature = "opencl")]
-/// This definition is a bit more complicated than necessary due to the lack of support
-/// for const generics. `T` is a [u32; N] array of the correct length here, and `U` is
-/// an OpenCL vector primitive containing the same amount of data.
-fn encode_big_endian_words_into_ocl_vector<T: TryFrom<Vec<u32>>, U: From<T>>(data: &[u8]) -> U
-where
-    T::Error: Debug,
-{
-    assert_eq!(data.len() % 4, 0);
+/// Reinterpret a block with 64 8-bit integers as an OpenCL vector with 16 32-bit big-endian integers
+fn encode_into_opencl_vector(data: GenericArray<u8, <Sha1 as BlockInput>::BlockSize>) -> Uint16 {
+    let words: [u32; 16] = data
+        .chunks(4)
+        .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
 
-    U::from(
-        data.chunks(4)
-            .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(),
-    )
+    words.into()
 }
 
 /// Hashes a commit object using git's object encoding, without adding padding or anything else

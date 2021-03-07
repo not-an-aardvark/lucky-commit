@@ -12,17 +12,20 @@ __kernel void scatter_padding_and_find_match(
     __global uint* desired_prefix_data,
     __global uint* desired_prefix_mask,
     __global uint* h,
-    uint4 padding_block_ending,
-    size_t num_post_padding_blocks,
-    __global uint16* post_padding_blocks,
+    __global uint16* dynamic_blocks,
+    size_t num_dynamic_blocks,
     __global uint* successful_match_receiver
 ) {
     uint finalized_hash[5] = {h[0], h[1], h[2], h[3], h[4]};
-
-    sha1_compress(finalized_hash, arrange_padding_block(get_global_id(0), padding_block_ending));
-
-    for (size_t i = 0; i < num_post_padding_blocks; i++) {
-        sha1_compress(finalized_hash, post_padding_blocks[i]);
+    sha1_compress(
+        finalized_hash,
+        arrange_padding_block(
+            get_global_id(0),
+            dynamic_blocks[0].sCDEF
+        )
+    );
+    for (size_t i = 1; i < num_dynamic_blocks; i++) {
+        sha1_compress(finalized_hash, dynamic_blocks[i]);
     }
 
     if (
