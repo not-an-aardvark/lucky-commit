@@ -3,7 +3,7 @@ use ocl::{
     builders::DeviceSpecifier::TypeFlags,
     flags::{DeviceType, MemFlags},
     prm::{Uint16, Uint4},
-    Platform, ProQue,
+    Buffer, Context, Kernel, Platform, Program, Queue,
 };
 use sha1::{
     compress,
@@ -16,7 +16,7 @@ use sha1::{
 #[cfg(feature = "opencl")]
 use std::convert::{TryFrom, TryInto};
 use std::{
-    cmp::min,
+    cmp::Ord,
     fmt::Debug,
     ops::Range,
     slice::from_raw_parts_mut,
@@ -151,8 +151,8 @@ impl HashSearchWorker {
 
     /// Caps a worker's search space to approximately the given size.
     pub fn with_capped_search_space(mut self, workload: u64) -> Self {
-        self.search_space =
-            self.search_space.start..min(self.search_space.end, self.search_space.start + workload);
+        self.search_space = self.search_space.start
+            ..Ord::min(self.search_space.end, self.search_space.start + workload);
         self
     }
 
@@ -254,7 +254,7 @@ impl HashSearchWorker {
         } = self;
         let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit();
 
-        let lame_duck_check_interval = min(search_space.end - search_space.start, 1 << 20);
+        let lame_duck_check_interval = Ord::min(search_space.end - search_space.start, 1 << 20);
         for base_padding_specifier in search_space.step_by(lame_duck_check_interval as usize) {
             for index_in_interval in 0..lame_duck_check_interval {
                 partially_hashed_commit.scatter_padding(base_padding_specifier + index_in_interval);
@@ -280,8 +280,6 @@ impl HashSearchWorker {
         } = self;
         let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit();
 
-        const BASE_PADDING_SPECIFIER_ARG: &str = "base_padding_specifier";
-
         let num_threads = *[
             desired_prefix.estimated_hashes_needed().saturating_mul(4),
             search_space.end - search_space.start,
@@ -294,80 +292,85 @@ impl HashSearchWorker {
 
         assert!(num_threads <= u32::MAX as usize);
 
-        let pro_que = ProQue::builder()
-            .src(include_str!("sha1_prefix_matcher.cl"))
-            .dims(num_threads)
-            .device(TypeFlags(DeviceType::GPU))
-            .build()?;
-        let desired_prefix_data_buffer = pro_que
-            .buffer_builder::<u32>()
-            .len(desired_prefix.data.len())
-            .flags(MemFlags::READ_ONLY)
-            .copy_host_slice(&desired_prefix.data[..])
-            .build()?;
-        let desired_prefix_mask_buffer = pro_que
-            .buffer_builder::<u32>()
-            .len(desired_prefix.mask.len())
-            .flags(MemFlags::READ_ONLY)
-            .copy_host_slice(&desired_prefix.mask[..])
-            .build()?;
-        let initial_state_buffer = pro_que
-            .buffer_builder::<u32>()
-            .len(partially_hashed_commit.intermediate_sha1_state.len())
-            .flags(MemFlags::READ_ONLY)
-            .copy_host_slice(&partially_hashed_commit.intermediate_sha1_state)
-            .build()?;
+        let devices = TypeFlags(DeviceType::GPU).to_device_list(Some(Platform::default()))?[0];
+        let context = Context::builder().devices(devices).build()?;
+        let queue = Queue::new(&context, devices, None)?;
 
-        // This is a slight hack -- it seems like passing a zero-length buffer
-        // (or null pointer) to an OpenCL kernel is not allowed. However, since we're
-        // passing the length in separately anyway, we can just pass a buffer of length
-        // 1 if there are no post-padding blocks, and it will never get used.
-        let post_padding_blocks_buffer = if partially_hashed_commit.dynamic_blocks.len() > 1 {
-            pro_que
-                .buffer_builder::<Uint16>()
-                .len(partially_hashed_commit.dynamic_blocks.len() - 1)
-                .flags(MemFlags::READ_ONLY)
-                .copy_host_slice(
-                    partially_hashed_commit.dynamic_blocks[1..]
-                        .iter()
-                        .map(|block| {
-                            encode_big_endian_words_into_ocl_vector::<[u32; 16], Uint16>(block)
-                        })
-                        .collect::<Vec<_>>()
-                        .as_slice(),
-                )
-                .build()?
-        } else {
-            pro_que
-                .buffer_builder::<Uint16>()
-                .len(1)
-                .flags(MemFlags::READ_ONLY)
-                .copy_host_slice(&[Uint16::zero()])
-                .build()?
-        };
         let mut successful_match_receiver_host_handle = [u32::MAX];
-        let successful_match_receiver = pro_que
-            .buffer_builder::<u32>()
+        let successful_match_receiver = Buffer::<u32>::builder()
+            .queue(queue.clone())
             .len(1)
             .flags(MemFlags::WRITE_ONLY)
             .copy_host_slice(&successful_match_receiver_host_handle)
             .build()?;
-        let kernel = pro_que
-            .kernel_builder("scatter_padding_and_find_match")
-            .arg(&desired_prefix_data_buffer)
-            .arg(&desired_prefix_mask_buffer)
-            .arg(&initial_state_buffer)
-            .arg_named(BASE_PADDING_SPECIFIER_ARG, &0) // filled in later
+        let mut kernel = Kernel::builder()
+            .name("scatter_padding_and_find_match")
+            .program(
+                &Program::builder()
+                    .binaries(&[
+                        &include_bytes!(concat!(env!("OUT_DIR"), "/sha1_prefix_matcher"))[..],
+                    ])
+                    .build(&context)?,
+            )
+            .queue(queue.clone())
+            .global_work_size(num_threads)
+            .arg(
+                &Buffer::<u32>::builder()
+                    .queue(queue.clone())
+                    .len(desired_prefix.data.len())
+                    .flags(MemFlags::READ_ONLY)
+                    .copy_host_slice(&desired_prefix.data[..])
+                    .build()?,
+            )
+            .arg(
+                &Buffer::<u32>::builder()
+                    .queue(queue.clone())
+                    .len(desired_prefix.mask.len())
+                    .flags(MemFlags::READ_ONLY)
+                    .copy_host_slice(&desired_prefix.mask[..])
+                    .build()?,
+            )
+            .arg(
+                &Buffer::<u32>::builder()
+                    .queue(queue.clone())
+                    .len(partially_hashed_commit.intermediate_sha1_state.len())
+                    .flags(MemFlags::READ_ONLY)
+                    .copy_host_slice(&partially_hashed_commit.intermediate_sha1_state)
+                    .build()?,
+            )
             .arg(encode_big_endian_words_into_ocl_vector::<[u32; 4], Uint4>(
                 &partially_hashed_commit.dynamic_blocks[0][48..],
             ))
             .arg(partially_hashed_commit.dynamic_blocks.len() - 1)
-            .arg(&post_padding_blocks_buffer)
+            .arg(
+                &Buffer::<Uint16>::builder()
+                    .queue(queue)
+                    .flags(MemFlags::READ_ONLY)
+                    // This is a slight hack -- it seems like passing a zero-length buffer
+                    // (or null pointer) to an OpenCL kernel is not allowed. However, since we're
+                    // passing the length in separately anyway, we can just pass a buffer of length
+                    // 1 if there are no post-padding blocks, and it will never get used.
+                    .len(Ord::max(
+                        partially_hashed_commit.dynamic_blocks.len() - 1,
+                        1,
+                    ))
+                    .copy_host_slice(&if partially_hashed_commit.dynamic_blocks.len() > 1 {
+                        partially_hashed_commit.dynamic_blocks[1..]
+                            .iter()
+                            .map(|block| {
+                                encode_big_endian_words_into_ocl_vector::<[u32; 16], Uint16>(block)
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![Uint16::zero()]
+                    })
+                    .build()?,
+            )
             .arg(&successful_match_receiver)
             .build()?;
 
         for base_padding_specifier in search_space.step_by(num_threads) {
-            kernel.set_arg(BASE_PADDING_SPECIFIER_ARG, base_padding_specifier)?;
+            kernel.set_default_global_work_offset((base_padding_specifier,).into());
 
             // SAFETY: The OpenCL sha1 script is optimistically assumed to have no memory safety issues
             unsafe {

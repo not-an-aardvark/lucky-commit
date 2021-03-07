@@ -19,6 +19,9 @@ opencl = ["ocl"]
 name = "lucky_commit"
 path = "src/bin.rs"
 
+[build-dependencies]
+ocl = { version = "0.19", optional = true }
+
 [dependencies]
 
 num_cpus = "1.0"
