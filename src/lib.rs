@@ -91,7 +91,7 @@ pub struct HashPrefix {
 #[derive(Debug, PartialEq, Clone)]
 struct ProcessedCommit {
     /// The data, as specified in the comment above. The length will always be a multiple of 64 bytes.
-    data: Vec<u8>,
+    data: Box<[u8]>,
     /// The location of the git commit, as an index range into `data`
     commit_range: Range<usize>,
     /// The number of 64-byte static blocks in the data
@@ -450,12 +450,12 @@ impl ProcessedCommit {
             data.len() + (56 - data.len() as isize).rem_euclid(64) as usize,
             0,
         );
-        data.extend_from_slice(&(commit_range.end as u64 * 8).to_be_bytes());
+        data.extend(&(commit_range.end as u64 * 8).to_be_bytes());
 
         assert_eq!(data.len() % 64, 0);
 
         Self {
-            data,
+            data: data.into_boxed_slice(),
             commit_range,
             num_static_blocks,
         }
