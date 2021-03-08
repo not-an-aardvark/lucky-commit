@@ -299,7 +299,7 @@ impl HashSearchWorker {
         let successful_match_receiver = Buffer::builder()
             .queue(queue.clone())
             .len(1)
-            .flags(MemFlags::WRITE_ONLY)
+            .flags(MemFlags::READ_WRITE)
             .copy_host_slice(&successful_match_receiver_host_handle)
             .build()?;
         let mut kernel = Kernel::builder()
