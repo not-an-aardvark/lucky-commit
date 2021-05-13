@@ -8,7 +8,7 @@ use std::{
 };
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args = env::args().collect::<Vec<String>>();
 
     if args.len() == 2 && args[1] == "--benchmark" {
         benchmark::run_benchmark();

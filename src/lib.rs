@@ -85,7 +85,7 @@ pub struct HashPrefix {
 // |--- SHA1 FINALIZATION PADDING (specified as part of the SHA1 algorithm) ---
 // | * The byte 0x80
 // | * Some number of null bytes (0x0), such that the point after the null bytes is at an offset of
-// |   56 (mod 64) from the start of the data
+// |   56 (mod 64) bytes from the start of the data
 // | * The bit-length of everything before the "finalization padding" section, represented as a big-endian
 // |   64-bit integer
 #[derive(Debug, PartialEq, Clone)]
@@ -534,7 +534,7 @@ impl ProcessedCommit {
             initial_padding_length_guess + 63
         };
 
-        assert_eq!(0, compute_alignment(static_padding_length));
+        assert_eq!(compute_alignment(static_padding_length), 0);
         debug_assert!((0..static_padding_length).all(|len| compute_alignment(len) != 0));
 
         static_padding_length
@@ -612,9 +612,9 @@ impl HashPrefix {
         for (i, chunk) in prefix.as_bytes().chunks(8).enumerate() {
             let value =
                 u32::from_str_radix(&String::from_utf8(chunk.to_vec()).unwrap(), 16).unwrap();
-            let num_unset_bits = 32 - 4 * chunk.len();
-            data[i] = value << num_unset_bits;
-            mask[i] = u32::MAX >> num_unset_bits << num_unset_bits;
+            let num_unspecified_bits = 32 - 4 * chunk.len();
+            data[i] = value << num_unspecified_bits;
+            mask[i] = u32::MAX >> num_unspecified_bits << num_unspecified_bits;
         }
 
         Some(HashPrefix { data, mask })
