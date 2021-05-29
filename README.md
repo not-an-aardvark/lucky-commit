@@ -28,7 +28,7 @@ $ git log
 
 ## Why?
 
-¯\\\_(ツ)_/¯
+¯\\\_(ツ)\_/¯
 
 ## Installation
 
@@ -72,3 +72,7 @@ The GPU on my 2015 MacBook Pro can compute about 196 million single-block hashes
 Outside of hashing, the tool also has to do a constant amount of I/O (e.g. spawning `git` a few times), resulting in an observed average time on my laptop of about 1.6 seconds.
 
 For GPG-signed commits, the commit message is part of the signed payload, so `lucky-commit` can't edit the commit message without making the signature invalid. Instead, it adds its whitespace to the end of the signature itself. Since the signature precedes the commit message in git's commit encoding, this requires `lucky-commit` to do more work on each attempt (it can't cache the SHA1 buffer state as effectively, and it needs to rehash the commit message every time). As a result, the performance for GPG-signed commits depends on the length of the commit message. This adds a multiplier of roughly `1 + ceiling(commit message length / 64 bytes)` to the average search time.
+
+## Related projects
+
+* [`every-git-commit-shorthash`](https://github.com/not-an-aardvark/every-git-commit-shorthash)
