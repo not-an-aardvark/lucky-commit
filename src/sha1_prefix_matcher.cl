@@ -53,10 +53,10 @@ uint16 arrange_padding_block(ulong padding_specifier, uint4 padding_block_ending
         PADDING_CHUNKS[(padding_specifier >> 32) & 0xf],
         PADDING_CHUNKS[(padding_specifier >> 40) & 0xf],
         PADDING_CHUNKS[(padding_specifier >> 44) & 0xf],
-        padding_block_ending[0],
-        padding_block_ending[1],
-        padding_block_ending[2],
-        padding_block_ending[3]
+        padding_block_ending.s0,
+        padding_block_ending.s1,
+        padding_block_ending.s2,
+        padding_block_ending.s3
     );
 }
 
@@ -103,22 +103,22 @@ void sha1_compress(__private uint* h, uint16 w) {
     uint d = h[3];
     uint e = h[4];
 
-    uint w0_t = w[0];
-    uint w1_t = w[1];
-    uint w2_t = w[2];
-    uint w3_t = w[3];
-    uint w4_t = w[4];
-    uint w5_t = w[5];
-    uint w6_t = w[6];
-    uint w7_t = w[7];
-    uint w8_t = w[8];
-    uint w9_t = w[9];
-    uint wa_t = w[10];
-    uint wb_t = w[11];
-    uint wc_t = w[12];
-    uint wd_t = w[13];
-    uint we_t = w[14];
-    uint wf_t = w[15];
+    uint w0_t = w.s0;
+    uint w1_t = w.s1;
+    uint w2_t = w.s2;
+    uint w3_t = w.s3;
+    uint w4_t = w.s4;
+    uint w5_t = w.s5;
+    uint w6_t = w.s6;
+    uint w7_t = w.s7;
+    uint w8_t = w.s8;
+    uint w9_t = w.s9;
+    uint wa_t = w.sA;
+    uint wb_t = w.sB;
+    uint wc_t = w.sC;
+    uint wd_t = w.sD;
+    uint we_t = w.sE;
+    uint wf_t = w.sF;
 
     #define K 0x5a827999
 
