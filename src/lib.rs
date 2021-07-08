@@ -306,9 +306,8 @@ impl HashSearchWorker {
             .name("scatter_padding_and_find_match")
             .program(
                 &Program::builder()
-                    .binaries(&[
-                        &include_bytes!(concat!(env!("OUT_DIR"), "/sha1_prefix_matcher"))[..],
-                    ])
+                    .src(include_str!("sha1_prefix_matcher.cl"))
+                    .cmplr_opt("-Werror")
                     .build(&context)?,
             )
             .arg(
