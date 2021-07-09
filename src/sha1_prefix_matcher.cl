@@ -13,7 +13,7 @@ __kernel void scatter_padding_and_find_match(
     __global uint* desired_prefix_mask,
     __global uint* h,
     __global uint16* dynamic_blocks,
-    size_t num_dynamic_blocks,
+    ulong num_dynamic_blocks,
     __global uint* successful_match_receiver
 ) {
     uint finalized_hash[5] = {h[0], h[1], h[2], h[3], h[4]};

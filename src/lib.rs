@@ -348,7 +348,7 @@ impl HashSearchWorker {
                     )
                     .build()?,
             )
-            .arg(partially_hashed_commit.dynamic_blocks.len())
+            .arg(partially_hashed_commit.dynamic_blocks.len() as u64)
             .arg(&successful_match_receiver)
             .queue(queue)
             .global_work_size(num_threads)
