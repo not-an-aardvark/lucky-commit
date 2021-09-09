@@ -47,15 +47,17 @@ $ cargo build --release
 
 This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
 
-### Optional: Disable OpenCL
+### Troubleshooting linker errors
 
-By default, `lucky-commit` links with your system's OpenCL headers and runs on a GPU. This makes it significantly faster. However, if you don't have any GPUs, or you encounter linker errors that you don't feel like dealing with, you can compile `lucky-commit` without OpenCL to make it fall back to a multithreaded CPU implementation. (This is about 10x slower on my laptop, although the degree of slowdown will vary significantly depending on your machine specs.)
+By default, `lucky-commit` links with your system's OpenCL headers and runs on a GPU. This makes it significantly faster.
 
-To compile `lucky-commit` without OpenCL, add the flag `--no-default-features` to your install or build command (i.e. `cargo install lucky_commit --locked --no-default-features` or `cargo build --release --no-default-features`).
+However, if you encounter a linker error along the lines of `/usr/bin/ld: cannot find -lOpenCL`, there are a few workarounds:
 
-### Installing an older version
+* Compile `lucky-commit` without OpenCL by adding the flag `--no-default-features` to your install or build command (i.e. `cargo install lucky_commit --locked --no-default-features` or `cargo build --release --no-default-features`). This will make `lucky-commit` fall back to a multithreaded CPU implementation. The CPU implementation is about 10x slower on my laptop, but depending on what you're planning to use the tool for, there's a good chance it's fast enough anyway.
 
-I've rewritten the `lucky-commit` project several times as a method to learn new programming languages. As a result, there are several older implementations of `lucky-commit` in different languages. To install an older version ([Node.js](https://github.com/not-an-aardvark/lucky-commit/tree/nodejs), [C](https://github.com/not-an-aardvark/lucky-commit/tree/C), or [pure Rust without OpenCL](https://github.com/not-an-aardvark/lucky-commit/tree/pure-rust-without-opencl)), see the instructions in the `README.md` file on the corresponding branch.
+    This is the recommended approach if you just want a stable build, and you don't need the extra performance from GPUs.
+* You can try installing the OpenCL libraries for your system. The instructions for this will vary by OS (see e.g. [here](https://software.intel.com/content/www/us/en/develop/articles/opencl-drivers.html)). Note that this will only be useful if your machine has a GPU.
+* You can try installing an older version of the library written in a different language (see the branches for [Node.js](https://github.com/not-an-aardvark/lucky-commit/tree/nodejs), [C](https://github.com/not-an-aardvark/lucky-commit/tree/C), and [pure Rust without OpenCL](https://github.com/not-an-aardvark/lucky-commit/tree/pure-rust-without-opencl)). Note that these older versions are drastically slower than the current version, and are also unmaintained.
 
 ## Performance
 
