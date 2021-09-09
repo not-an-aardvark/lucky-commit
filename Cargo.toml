@@ -6,6 +6,7 @@ edition = "2018"
 description = "Make your git commits lucky!"
 repository = "https://github.com/not-an-aardvark/lucky-commit"
 license = "MIT"
+resolver = "2"
 
 [lib]
 name = "lucky_commit"
@@ -19,14 +20,15 @@ opencl = ["ocl"]
 name = "lucky_commit"
 path = "src/bin.rs"
 
-[build-dependencies]
-ocl = { version = "0.19", optional = true }
-
 [dependencies]
-
 num_cpus = "1.0"
-"sha-1" = { version = "0.9", "default-features" = false, features = ["asm", "compress"] }
 ocl = { version = "0.19", optional = true }
+
+# See https://github.com/RustCrypto/hashes/issues/315
+[target.'cfg(target_env = "msvc")'.dependencies]
+"sha-1" = { version = "0.9", "default-features" = false, features = ["compress"] }
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+"sha-1" = { version = "0.9", "default-features" = false, features = ["asm", "compress"] }
 
 [profile.release]
 lto = true
