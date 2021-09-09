@@ -12,6 +12,7 @@ __kernel void scatter_padding_and_find_match(
     __global uint* desired_prefix_data,
     __global uint* desired_prefix_mask,
     __global uint* h,
+    ulong base_padding_specifier,
     __global uint16* dynamic_blocks,
     ulong num_dynamic_blocks,
     __global uint* successful_match_receiver
@@ -20,7 +21,7 @@ __kernel void scatter_padding_and_find_match(
     sha1_compress(
         finalized_hash,
         arrange_padding_block(
-            get_global_id(0),
+            base_padding_specifier + get_global_id(0),
             dynamic_blocks[0].sCDEF
         )
     );
@@ -35,7 +36,7 @@ __kernel void scatter_padding_and_find_match(
         (finalized_hash[3] & desired_prefix_mask[3]) == desired_prefix_data[3] &&
         (finalized_hash[4] & desired_prefix_mask[4]) == desired_prefix_data[4]
     ) {
-        atomic_cmpxchg(successful_match_receiver, UINT_MAX, get_global_id(0) % get_global_size(0));
+        atomic_cmpxchg(successful_match_receiver, UINT_MAX, get_global_id(0));
     }
 }
 
@@ -51,8 +52,8 @@ uint16 arrange_padding_block(ulong padding_specifier, uint4 padding_block_ending
         PADDING_CHUNKS[(padding_specifier >> 24) & 0xf],
         PADDING_CHUNKS[(padding_specifier >> 36) & 0xf],
         PADDING_CHUNKS[(padding_specifier >> 32) & 0xf],
-        PADDING_CHUNKS[(padding_specifier >> 40) & 0xf],
         PADDING_CHUNKS[(padding_specifier >> 44) & 0xf],
+        PADDING_CHUNKS[(padding_specifier >> 40) & 0xf],
         padding_block_ending.s0,
         padding_block_ending.s1,
         padding_block_ending.s2,

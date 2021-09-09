@@ -187,6 +187,34 @@ fn search_success_after_many_iterations() {
 }
 
 #[test]
+fn search_success_with_large_padding_specifier() {
+    assert_eq!(
+        HashSearchWorker {
+            processed_commit: ProcessedCommit::new(
+                format!(
+                    test_commit_without_signature!(),
+                    static_padding = "",
+                    dynamic_padding = ""
+                )
+                .as_bytes()
+            ),
+            desired_prefix: HashPrefix::new("00").unwrap(),
+            search_space: (1 << 40)..((1 << 40) + 256)
+        }
+        .search(),
+        Some(HashedCommit {
+            commit: format!(
+                test_commit_without_signature!(),
+                static_padding = repeat(" ").take(61).collect::<String>(),
+                dynamic_padding = "\t  \t \t                                         \t"
+            )
+            .into_bytes(),
+            hash: "008429bb1623671620cd203e57d622174ba2b8c3".to_owned()
+        })
+    );
+}
+
+#[test]
 fn search_success_with_full_prefix_and_no_capped_space() {
     // If this test keeps running and never finishes, it might indicate a bug in the lame-duck thread
     // signalling (where a single thread finds a match, but the other threads don't realize that they

@@ -302,7 +302,9 @@ impl HashSearchWorker {
             .flags(MemFlags::READ_WRITE)
             .copy_host_slice(&successful_match_receiver_host_handle)
             .build()?;
-        let mut kernel = Kernel::builder()
+
+        const BASE_PADDING_SPECIFIER_ARG: &str = "base_padding_specifier";
+        let kernel = Kernel::builder()
             .name("scatter_padding_and_find_match")
             .program(
                 &Program::builder()
@@ -334,6 +336,7 @@ impl HashSearchWorker {
                     .copy_host_slice(&partially_hashed_commit.intermediate_sha1_state)
                     .build()?,
             )
+            .arg_named(BASE_PADDING_SPECIFIER_ARG, 0) // filled in later
             .arg(
                 &Buffer::builder()
                     .queue(queue.clone())
@@ -355,7 +358,7 @@ impl HashSearchWorker {
             .build()?;
 
         for base_padding_specifier in search_space.step_by(num_threads) {
-            kernel.set_default_global_work_offset((base_padding_specifier,).into());
+            kernel.set_arg(BASE_PADDING_SPECIFIER_ARG, base_padding_specifier)?;
 
             // SAFETY: The OpenCL sha1 script is optimistically assumed to have no memory safety issues
             unsafe {
