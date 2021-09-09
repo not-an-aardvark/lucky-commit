@@ -252,7 +252,7 @@ checksum = "3cb00336871be5ed2c8ed44b60ae9959dc5b9f08539422ed43f09e34ecaeba21"
 
 [[package]]
 name = "lucky_commit"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "num_cpus",
  "ocl",
