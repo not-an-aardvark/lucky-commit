@@ -47,6 +47,16 @@ $ cargo build --release
 
 This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
 
+#### Distro packages
+
+##### Arch Linux
+
+`lucky-commit` can be installed from the [community repository](https://archlinux.org/packages/community/x86_64/lucky-commit/) using [pacman](https://wiki.archlinux.org/title/Pacman):
+
+```
+$ pacman -S lucky-commit
+```
+
 ### Troubleshooting linker errors
 
 By default, `lucky-commit` links with your system's OpenCL headers and runs on a GPU. This makes it significantly faster.
