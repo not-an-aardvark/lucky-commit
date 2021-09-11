@@ -47,16 +47,6 @@ $ cargo build --release
 
 This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
 
-#### Distro packages
-
-##### Arch Linux
-
-`lucky-commit` can be installed from the [community repository](https://archlinux.org/packages/community/x86_64/lucky-commit/) using [pacman](https://wiki.archlinux.org/title/Pacman):
-
-```
-$ pacman -S lucky-commit
-```
-
 ### Troubleshooting linker errors
 
 By default, `lucky-commit` links with your system's OpenCL headers and runs on a GPU. This makes it significantly faster.
@@ -68,6 +58,16 @@ However, if you encounter a linker error along the lines of `/usr/bin/ld: cannot
     This is the recommended approach if you just want a stable build, and you don't need the extra performance from GPUs.
 * You can try installing the OpenCL libraries for your system. The instructions for this will vary by OS (see e.g. [here](https://software.intel.com/content/www/us/en/develop/articles/opencl-drivers.html)). Note that this will only be useful if your machine has a GPU.
 * You can try installing an older version of the library written in a different language (see the branches for [Node.js](https://github.com/not-an-aardvark/lucky-commit/tree/nodejs), [C](https://github.com/not-an-aardvark/lucky-commit/tree/C), and [pure Rust without OpenCL](https://github.com/not-an-aardvark/lucky-commit/tree/pure-rust-without-opencl)). Note that these older versions are drastically slower than the current version, and are also unmaintained.
+
+### Distro packages
+
+#### Arch Linux
+
+`lucky-commit` can be installed from the [community repository](https://archlinux.org/packages/community/x86_64/lucky-commit/) using [pacman](https://wiki.archlinux.org/title/Pacman):
+
+```
+$ pacman -S lucky-commit
+```
 
 ## Performance
 
