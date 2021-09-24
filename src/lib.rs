@@ -37,10 +37,6 @@ pub struct HashSearchWorker {
 }
 
 /// Defines a desired target prefix for a commit hash.
-///
-/// For example, the hash prefix "deadbeef123" corresponds to the
-/// following structure:
-///   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
 #[derive(Debug, PartialEq, Clone)]
 pub struct HashPrefix {
     /// The prefix, as split into big-endian four-byte chunks.
@@ -49,6 +45,10 @@ pub struct HashPrefix {
     /// Mask containing bits set to 1 if the bit at that position is specified
     /// in the prefix, and 0 otherwise.
     mask: [u32; 5],
+
+    // For example, the hash prefix "deadbeef123" corresponds to the
+    // following structure:
+    //   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
 }
 
 // The fully padded data that gets hashed is the concatenation of all the following:
