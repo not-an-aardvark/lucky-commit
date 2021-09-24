@@ -7,6 +7,7 @@ description = "Make your git commits lucky!"
 repository = "https://github.com/not-an-aardvark/lucky-commit"
 license = "MIT"
 resolver = "2"
+include = ["src/**/*", "Cargo.*", "LICENSE.md", "README.md"]
 
 [lib]
 name = "lucky_commit"
