@@ -84,8 +84,8 @@ pub struct HashPrefix {
 // |   will contain the commit message.
 // |--- SHA1 FINALIZATION PADDING (specified as part of the SHA1 algorithm) ---
 // | * The byte 0x80
-// | * Some number of null bytes (0x0), such that the point after the null bytes is at an offset of
-// |   56 (mod 64) bytes from the start of the data
+// | * Up to 63 null bytes (0x0), such that the point after the null bytes is at an offset of 56 (mod 64) bytes
+// |   from the start of the data
 // | * The bit-length of everything before the "finalization padding" section, represented as a big-endian
 // |   64-bit integer
 #[derive(Debug, PartialEq, Clone)]
