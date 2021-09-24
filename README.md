@@ -79,7 +79,7 @@ For non-GPG-signed commits, `lucky-commit` adds its whitespace to a 64-byte-alig
 
 Hash searching is extremely parallelizable, and `lucky-commit` takes advantage of this by running on a GPU when available. (The intuitive idea is that if you pretend that your commits are actually graphical image data, where SHA1 is a "shading" that gets applied to the whole image at once, and the resulting commit shorthashes are, say, RGBA pixel color values, then you can hash a large number of commits at once by just "rendering the image".)
 
-The GPU on my 2015 MacBook Pro can compute about 196 million single-block hashes per second. As a result, the theoretical average time to find a `0000000` commit hash on my laptop is (16<sup>7</sup> hashes) / (196000000 hashes/s) = **1.37 seconds**. You can estimate the theoretical average time for your computer by running `time lucky_commit --benchmark`.
+The GPU on my 2015 MacBook Pro can compute about 196 million single-block hashes per second. As a result, the theoretical average time to find a `0000000` commit hash on my laptop is (16<sup>7</sup> hashes) / (196000000 hashes/s) = **1.37 seconds**. You can estimate the average time for your computer by running `time lucky_commit --benchmark`.
 
 Outside of hashing, the tool also has to do a constant amount of I/O (e.g. spawning `git` a few times), resulting in an observed average time on my laptop of about 1.6 seconds.
 
