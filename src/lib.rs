@@ -125,8 +125,6 @@ struct PartiallyHashedCommit<'a> {
     dynamic_blocks: &'a mut [GenericArray<u8, <Sha1 as BlockInput>::BlockSize>],
 }
 
-const SHA1_INITIAL_STATE: [u32; 5] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
-
 /// The result of a successful hash search
 #[derive(Debug, PartialEq)]
 pub struct HashedCommit {
@@ -547,6 +545,8 @@ impl ProcessedCommit {
     }
 
     fn as_partially_hashed_commit(&mut self) -> PartiallyHashedCommit {
+        const SHA1_INITIAL_STATE: [u32; 5] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+
         let (static_blocks, dynamic_blocks) =
             as_chunks_mut::<u8, <Sha1 as BlockInput>::BlockSize>(&mut self.data[..])
                 .0
