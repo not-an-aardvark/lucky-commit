@@ -1,4 +1,4 @@
-use lucky_commit::{HashPrefix, HashSearchWorker};
+use lucky_commit::{HashPrefix, HashSearchWorker, Sha1};
 
 pub fn run_benchmark() {
     // Runs a benchmark for performance testing. This does a constant hash search. This benchmark
@@ -21,7 +21,7 @@ pub fn run_benchmark() {
                 committer Foo Bar <foo@example.com> 1611912738 -0500\n\
                 \n\
                 Test commit for benchmarking performance changes\n",
-            HashPrefix::new("000000000000000000000000000000000000000").unwrap(),
+            HashPrefix::<Sha1>::new("000000000000000000000000000000000000000").unwrap(),
         )
         .with_capped_search_space(1 << 28)
         .search(),

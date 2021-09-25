@@ -5,19 +5,13 @@ use ocl::{
     prm::Uint16,
     Buffer, Context, Kernel, Platform, Program, Queue,
 };
-use sha1::{
-    compress,
-    digest::{
-        generic_array::{ArrayLength, GenericArray},
-        BlockInput, Digest,
-    },
-    Sha1,
-};
-#[cfg(feature = "opencl")]
-use std::convert::TryInto;
 use std::{
+    array::TryFromSliceError,
     cmp::Ord,
+    convert::{TryFrom, TryInto},
     fmt::Debug,
+    iter::{once, repeat},
+    mem::{align_of, size_of},
     ops::Range,
     slice::from_raw_parts_mut,
     sync::{
@@ -30,22 +24,21 @@ use std::{
 /// A worker that, when invoked, will look in a predetermined search space to find a modification
 /// to a specific commit that matches a specific hash prefix.
 #[derive(Debug, PartialEq)]
-pub struct HashSearchWorker {
+pub struct HashSearchWorker<H: GitHash> {
     processed_commit: ProcessedCommit,
-    desired_prefix: HashPrefix,
+    desired_prefix: HashPrefix<H>,
     search_space: Range<u64>,
 }
 
 /// Defines a desired target prefix for a commit hash.
 #[derive(Debug, PartialEq, Clone)]
-pub struct HashPrefix {
+pub struct HashPrefix<H: GitHash> {
     /// The prefix, as split into big-endian four-byte chunks.
     /// All bits beyond the length of the prefix are set to 0.
-    data: [u32; 5],
+    data: H::State,
     /// Mask containing bits set to 1 if the bit at that position is specified
     /// in the prefix, and 0 otherwise.
-    mask: [u32; 5],
-
+    mask: H::State,
     // For example, the hash prefix "deadbeef123" corresponds to the
     // following structure:
     //   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
@@ -76,13 +69,13 @@ pub struct HashPrefix {
 // |         "dynamic blocks".
 // |
 // | * 48 bytes of "dynamic padding", consisting of some combination of ASCII space and tab characters.
-// |   This is the only part of the commit data that actually varies across SHA1 invocations. The ultimate
+// |   This is the only part of the commit data that actually varies across hash invocations. The ultimate
 // |   goal is to find a dynamic padding arrangement that produces the desired hash. A 48-byte length was
 // |   chosen with the goal of only needing a single dynamic block for non-GPG-signed commits.
 // | * The rest of the original commit object (from the "padding insertion point" onwards). For
 // |   non-GPG-signed commits, this will typically just be a single newline. For GPG-signed commits, this
 // |   will contain the commit message.
-// |--- SHA1 FINALIZATION PADDING (specified as part of the SHA1 algorithm) ---
+// |--- SHA1/SHA256 FINALIZATION PADDING (specified as part of the SHA1/SHA256 algorithm) ---
 // | * The byte 0x80
 // | * Up to 63 null bytes (0x0), such that the point after the null bytes is at an offset of 56 (mod 64) bytes
 // |   from the start of the data
@@ -98,20 +91,20 @@ struct ProcessedCommit {
     num_static_blocks: usize,
 }
 
-/// A view of an underlying `ProcessedCommit`, with cached SHA1 state.
+/// A view of an underlying `ProcessedCommit`, with cached hash state.
 ///
-/// SHA1 works as follows:
+/// SHA1 and SHA256 work as follows:
 ///
-/// * First, a 20-byte "state vector" is initialized to a constant.
+/// * First, a 20-byte or 32-byte "state vector" is initialized to a constant.
 /// * Next, each each 64-byte block in the input is processed in sequence. The state vector after
 /// processing a block is a convoluted, deteriministic function of (a) the state vector before
 /// processing the block, and (b) the contents of the block. Processing blocks is the main performance
 /// bottleneck of lucky-commit.
-/// * The "SHA1 hash" of some data is just the contents of the state vector after processing all of
-/// the data (with SHA1 finalization padding added to the end of the data, as described in the comment
+/// * The "hash" of some data is just the contents of the state vector after processing all of
+/// the data (with finalization padding added to the end of the data, as described in the comment
 /// about the `ProcessedCommit` format).
 ///
-/// So there's a big optimization we can do here -- we have to compute a bunch of SHA1 hashes, but the
+/// So there's a big optimization we can do here -- we have to compute a bunch of hashes, but the
 /// only part of the data that we're changing between runs is the dynamic padding, which is very close
 /// to the end of the data. The state vector after processing all of the blocks before the dynamic
 /// padding (the "static blocks") doesn't depend at all on the contents of the dynamic padding -- it's
@@ -120,26 +113,147 @@ struct ProcessedCommit {
 /// padding. This drastically reduces the number of blocks that need to be processed, resulting in a
 /// ~5x end-to-end performance improvement for an average-sized commit.
 #[derive(Debug)]
-struct PartiallyHashedCommit<'a> {
-    intermediate_sha1_state: [u32; 5],
-    dynamic_blocks: &'a mut [GenericArray<u8, <Sha1 as BlockInput>::BlockSize>],
+struct PartiallyHashedCommit<'a, H: GitHash> {
+    intermediate_state: H::State,
+    dynamic_blocks: &'a mut [H::Block],
 }
 
 /// The result of a successful hash search
-#[derive(Debug, PartialEq)]
-pub struct HashedCommit {
+#[derive(Debug, PartialEq, Eq)]
+pub struct HashedCommit<H: GitHash> {
     /// The git commit that has the desired hash
     pub commit: Vec<u8>,
 
     /// The hash of the commit, as a hex string
-    pub hash: String,
+    pub hash: H::State,
 }
 
-impl HashSearchWorker {
+/// A hash function used by git. This is a sealed trait implemented by `Sha1` and `Sha256`.
+/// The fields and methods on this trait are subject to change. Consumers should pretend that
+/// the types implementing the trait are opaque.
+pub trait GitHash: private::Sealed + Debug + Send + Clone + Eq + 'static {
+    /// The type of the output and intermediate state of this hash function.
+    /// Ideally this trait would just have an associated const for the length of the state vector,
+    /// and then `State` would be defined as `[u32; N]`, but this isn't possible due
+    /// to https://github.com/rust-lang/rust/issues/60551.
+    /// Instead, a `StateVector<N>` wrapper type is used, which is effectively the same
+    /// thing, but requires manual trait implementations and results in marginally
+    /// less type safety in HashPrefix::new.
+    type State: AsRef<[u32]>
+        + Clone
+        + Copy
+        + Debug
+        + Eq
+        + Send
+        + ToString
+        + for<'a> TryFrom<&'a [u32], Error = TryFromSliceError>;
+
+    /// The initial value of the state vector for the given algorithm
+    const INITIAL_STATE: Self::State;
+
+    /// The datatype representing a block for this algorithm. This is equivalent to [u8; 64]
+    /// for both SHA1 and SHA256, although the nominal type that gets used might be different
+    /// on a per-library basis due to const generic limitations.
+    type Block: AsRef<[u8]> + AsMut<[u8]> + Copy + Debug;
+
+    /// Processes a set of blocks using the given algorithm
+    fn compress(state: &mut Self::State, blocks: &[Self::Block]);
+
+    #[cfg(feature = "opencl")]
+    /// Source code of an OpenCL shader kernel finding prefix matches for the given
+    /// algorithm. The kernel should have a function `scatter_padding_and_find_match`, which
+    /// accepts the following parameters:
+    /// 1. A pointer to the `data` in the desired hash prefix (pointing to the appropriate
+    ///    number of bytes for the given hash algorithm)
+    /// 1. A pointer to the `mask` of the desired hash prefix
+    /// 1. The "base padding specifier" for the current run, which determines which padding will
+    ///    be attempted. The padding specifier used by any given thread is equal to the base
+    ///    specifier offset by that thread's ID.
+    /// 1. A pointer to the intermediate state after all static blocks have been hashed
+    /// 1. A pointer to the dynamic blocks, encoded as big-endian 32-bit integers
+    /// 1. The number of dynamic blocks that are present
+    /// 1. A writeable pointer where the shader should write a thread ID if it finds an appropriate
+    ///    match.
+    const KERNEL: &'static str;
+}
+
+/// The hash type used for Sha1 git repositories (the default at the time of writing)
+/// This type is uninhabited, and is only intended to be used as a type parameter.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Sha1 {}
+impl GitHash for Sha1 {
+    type State = StateVector<5>;
+
+    const INITIAL_STATE: Self::State =
+        StateVector([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0]);
+    type Block =
+        sha1::digest::generic_array::GenericArray<u8, sha1::digest::generic_array::typenum::U64>;
+
+    fn compress(state: &mut Self::State, blocks: &[Self::Block]) {
+        sha1::compress(&mut state.0, blocks)
+    }
+
+    #[cfg(feature = "opencl")]
+    const KERNEL: &'static str = include_str!("sha1_prefix_matcher.cl");
+}
+
+/// The hash type used for Sha256 git repositories.
+/// This type is uninhabited, and is only intended to be used as a type parameter.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Sha256 {}
+impl GitHash for Sha256 {
+    type State = StateVector<8>;
+
+    const INITIAL_STATE: Self::State = StateVector([
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ]);
+    type Block =
+        sha2::digest::generic_array::GenericArray<u8, sha2::digest::generic_array::typenum::U64>;
+
+    fn compress(state: &mut Self::State, blocks: &[Self::Block]) {
+        sha2::compress256(&mut state.0, blocks)
+    }
+
+    #[cfg(feature = "opencl")]
+    const KERNEL: &'static str = include_str!("sha256_prefix_matcher.cl");
+}
+
+mod private {
+    pub trait Sealed {}
+    impl Sealed for super::Sha1 {}
+    impl Sealed for super::Sha256 {}
+}
+
+/// The output data for a given hash function. `N` is the number of 32-bit words in the length.
+/// Sha1 outputs consist of 5 32-bit words. Sha256 outputs consist of 8 32-bit words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StateVector<const N: usize>([u32; N]);
+
+impl<const N: usize> AsRef<[u32]> for StateVector<N> {
+    fn as_ref(&self) -> &[u32] {
+        self.0.as_ref()
+    }
+}
+
+impl<'a, const N: usize> TryFrom<&'a [u32]> for StateVector<N> {
+    type Error = <[u32; N] as TryFrom<&'a [u32]>>::Error;
+    fn try_from(value: &'_ [u32]) -> Result<Self, Self::Error> {
+        <[u32; N]>::try_from(value).map(Self)
+    }
+}
+
+impl<const N: usize> ToString for StateVector<N> {
+    fn to_string(&self) -> String {
+        self.0.iter().map(|word| format!("{:08x}", word)).collect()
+    }
+}
+
+impl<H: GitHash> HashSearchWorker<H> {
     /// Creates a worker for a specific commit and prefix, with an initial
     /// workload of 1 ** 48 units. As a rough approximation depending on hardware,
     /// each worker can perform about 7 million units of work per second.
-    pub fn new(current_commit: &[u8], desired_prefix: HashPrefix) -> Self {
+    pub fn new(current_commit: &[u8], desired_prefix: HashPrefix<H>) -> Self {
         Self {
             processed_commit: ProcessedCommit::new(current_commit),
             desired_prefix,
@@ -181,7 +295,7 @@ impl HashSearchWorker {
 
     /// Invokes the worker. The worker will return early with a hash match if it finds one,
     /// otherwise it will search its entire search space and return `None`.
-    pub fn search(self) -> Option<HashedCommit> {
+    pub fn search(self) -> Option<HashedCommit<H>> {
         #[cfg(feature = "opencl")]
         if Self::gpus_available() {
             return self.search_with_gpu().unwrap();
@@ -200,7 +314,7 @@ impl HashSearchWorker {
     }
 
     #[allow(clippy::needless_collect)]
-    fn search_with_cpus(self) -> Option<HashedCommit> {
+    fn search_with_cpus(self) -> Option<HashedCommit<H>> {
         let thread_count = num_cpus::get_physical();
         let lame_duck_cancel_signal = Arc::new(AtomicBool::new(false));
         let (shared_sender, receiver) = mpsc::channel();
@@ -244,13 +358,14 @@ impl HashSearchWorker {
     fn search_with_cpu_single_threaded(
         self,
         lame_duck_cancel_signal: Arc<AtomicBool>,
-    ) -> Option<HashedCommit> {
+    ) -> Option<HashedCommit<H>> {
         let HashSearchWorker {
             search_space,
             desired_prefix,
             mut processed_commit,
+            ..
         } = self;
-        let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit();
+        let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit::<H>();
 
         let lame_duck_check_interval = Ord::min(search_space.end - search_space.start, 1 << 20);
         for base_padding_specifier in search_space.step_by(lame_duck_check_interval as usize) {
@@ -270,13 +385,14 @@ impl HashSearchWorker {
     }
 
     #[cfg(feature = "opencl")]
-    fn search_with_gpu(self) -> ocl::Result<Option<HashedCommit>> {
+    fn search_with_gpu(self) -> ocl::Result<Option<HashedCommit<H>>> {
         let HashSearchWorker {
             search_space,
             desired_prefix,
             mut processed_commit,
+            ..
         } = self;
-        let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit();
+        let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit::<H>();
 
         let num_threads = *[
             desired_prefix.estimated_hashes_needed().saturating_mul(4),
@@ -306,32 +422,32 @@ impl HashSearchWorker {
             .name("scatter_padding_and_find_match")
             .program(
                 &Program::builder()
-                    .src(include_str!("sha1_prefix_matcher.cl"))
+                    .src(H::KERNEL)
                     .cmplr_opt("-Werror")
                     .build(&context)?,
             )
             .arg(
                 &Buffer::builder()
                     .queue(queue.clone())
-                    .len(desired_prefix.data.len())
+                    .len(desired_prefix.data.as_ref().len())
                     .flags(MemFlags::READ_ONLY)
-                    .copy_host_slice(&desired_prefix.data[..])
+                    .copy_host_slice(desired_prefix.data.as_ref())
                     .build()?,
             )
             .arg(
                 &Buffer::builder()
                     .queue(queue.clone())
-                    .len(desired_prefix.mask.len())
+                    .len(desired_prefix.mask.as_ref().len())
                     .flags(MemFlags::READ_ONLY)
-                    .copy_host_slice(&desired_prefix.mask[..])
+                    .copy_host_slice(desired_prefix.mask.as_ref())
                     .build()?,
             )
             .arg(
                 &Buffer::builder()
                     .queue(queue.clone())
-                    .len(partially_hashed_commit.intermediate_sha1_state.len())
+                    .len(partially_hashed_commit.intermediate_state.as_ref().len())
                     .flags(MemFlags::READ_ONLY)
-                    .copy_host_slice(&partially_hashed_commit.intermediate_sha1_state)
+                    .copy_host_slice(partially_hashed_commit.intermediate_state.as_ref())
                     .build()?,
             )
             .arg_named(BASE_PADDING_SPECIFIER_ARG, 0) // filled in later
@@ -344,7 +460,7 @@ impl HashSearchWorker {
                         &partially_hashed_commit
                             .dynamic_blocks
                             .iter()
-                            .map(|&block| encode_into_opencl_vector(block))
+                            .map(|&block| encode_into_opencl_vector::<H>(block))
                             .collect::<Vec<_>>(),
                     )
                     .build()?,
@@ -358,7 +474,7 @@ impl HashSearchWorker {
         for base_padding_specifier in search_space.step_by(num_threads) {
             kernel.set_arg(BASE_PADDING_SPECIFIER_ARG, base_padding_specifier)?;
 
-            // SAFETY: The OpenCL sha1 script is optimistically assumed to have no memory safety issues
+            // SAFETY: The OpenCL scripts are optimistically assumed to have no memory safety issues
             unsafe {
                 kernel.enq()?;
             }
@@ -378,7 +494,7 @@ impl HashSearchWorker {
                         A GPU search reported a commit with a successful match, but when that \
                         commit was hashed in postprocessing, it didn't match the desired prefix. \
                         This is a bug. The most likely explanation is that the two implementations of \
-                        `scatter_padding` in Rust and OpenCL (or the implementations of SHA1) have diverged \
+                        `scatter_padding` in Rust and OpenCL (or the implementations of SHA1/SHA256) have diverged \
                         from each other.\n\npartial commit:\n\t{:?}\ndesired prefix:\n\t{:?}\ncommit hash \
                         produced during postprocessing:{:?}\n\tpadding specifier: {}",
                     partially_hashed_commit,
@@ -444,14 +560,8 @@ impl ProcessedCommit {
 
         assert_eq!(data.len(), commit_range.end);
 
-        // SHA1 finalization padding
-        data.push(0x80);
-        data.resize(
-            data.len() + (56 - data.len() as isize).rem_euclid(64) as usize,
-            0,
-        );
-        data.extend(&(commit_range.end as u64 * 8).to_be_bytes());
-
+        // SHA finalization padding
+        data.extend(sha_finalization_padding(data.len()));
         assert_eq!(data.len() % 64, 0);
 
         Self {
@@ -475,7 +585,9 @@ impl ProcessedCommit {
         let mut found_gpgsig_line = false;
         const SIGNATURE_MARKER: &[u8] = b"-----END PGP SIGNATURE-----";
         for index in 0..commit.len() {
-            if commit[index..].starts_with(b"\ngpgsig ") {
+            if commit[index..].starts_with(b"\ngpgsig ")
+                || commit[index..].starts_with(b"\ngpgsig-sha256 ")
+            {
                 found_gpgsig_line = true;
             } else if !found_gpgsig_line && commit[index..].starts_with(b"\n\n") {
                 // We've reached the commit message and no GPG signature has been found.
@@ -544,28 +656,24 @@ impl ProcessedCommit {
         &self.data[self.commit_range.clone()]
     }
 
-    fn as_partially_hashed_commit(&mut self) -> PartiallyHashedCommit {
-        const SHA1_INITIAL_STATE: [u32; 5] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
-
+    fn as_partially_hashed_commit<H: GitHash>(&mut self) -> PartiallyHashedCommit<H> {
         let (static_blocks, dynamic_blocks) =
-            as_chunks_mut::<u8, <Sha1 as BlockInput>::BlockSize>(&mut self.data[..])
-                .0
-                .split_at_mut(self.num_static_blocks);
+            as_chunks_mut::<H>(&mut self.data[..]).split_at_mut(self.num_static_blocks);
 
-        let mut intermediate_sha1_state = SHA1_INITIAL_STATE;
-        compress(&mut intermediate_sha1_state, static_blocks);
+        let mut intermediate_state = H::INITIAL_STATE;
+        H::compress(&mut intermediate_state, static_blocks);
 
         PartiallyHashedCommit {
-            intermediate_sha1_state,
+            intermediate_state,
             dynamic_blocks,
         }
     }
 }
 
-impl<'a> PartiallyHashedCommit<'a> {
+impl<'a, H: GitHash> PartiallyHashedCommit<'a, H> {
     #[inline(always)]
     fn dynamic_padding_mut(&mut self) -> &mut [u8] {
-        &mut self.dynamic_blocks[0][..48]
+        &mut self.dynamic_blocks[0].as_mut()[..48]
     }
 
     // This should be kept in sync with the OpenCL `arrange_padding_block` implementation.
@@ -585,18 +693,19 @@ impl<'a> PartiallyHashedCommit<'a> {
     }
 
     #[inline(always)]
-    fn current_hash(&self) -> [u32; 5] {
-        let mut sha1_hash = self.intermediate_sha1_state;
-        compress(&mut sha1_hash, self.dynamic_blocks);
-        sha1_hash
+    fn current_hash(&self) -> H::State {
+        let mut hash = self.intermediate_state;
+        H::compress(&mut hash, self.dynamic_blocks);
+        hash
     }
 }
 
-impl HashPrefix {
+impl<H: GitHash> HashPrefix<H> {
     /// Creates a new hash prefix from a hex string, which is at most 40 characters.
     /// Returns `None` if the supplied prefix was invalid.
     pub fn new(prefix: &str) -> Option<Self> {
-        if prefix.len() > 40 {
+        let num_words = H::INITIAL_STATE.as_ref().len();
+        if prefix.len() > num_words * 8 {
             return None;
         }
 
@@ -608,54 +717,67 @@ impl HashPrefix {
             return None;
         }
 
-        let mut data = [0u32; 5];
-        let mut mask = [0u32; 5];
+        let mut data = Vec::new();
+        let mut mask = Vec::new();
 
-        for (i, chunk) in prefix.as_bytes().chunks(8).enumerate() {
+        for chunk in prefix.as_bytes().chunks(8) {
             let value =
                 u32::from_str_radix(&String::from_utf8(chunk.to_vec()).unwrap(), 16).unwrap();
             let num_unspecified_bits = 32 - 4 * chunk.len();
-            data[i] = value << num_unspecified_bits;
-            mask[i] = u32::MAX >> num_unspecified_bits << num_unspecified_bits;
+            data.push(value << num_unspecified_bits);
+            mask.push(u32::MAX >> num_unspecified_bits << num_unspecified_bits);
         }
+        data.resize(num_words, 0);
+        mask.resize(num_words, 0);
 
-        Some(HashPrefix { data, mask })
+        Some(HashPrefix {
+            data: data[..].try_into().unwrap(),
+            mask: mask[..].try_into().unwrap(),
+        })
     }
 
     #[inline(always)]
-    fn matches(&self, hash: &[u32; 5]) -> bool {
-        hash.iter()
-            .zip(&self.mask)
+    fn matches(&self, hash: &H::State) -> bool {
+        hash.as_ref()
+            .iter()
+            .zip(self.mask.as_ref().iter())
             .map(|(&hash_word, &mask_word)| hash_word & mask_word)
-            .zip(&self.data)
+            .zip(self.data.as_ref().iter())
             .all(|(masked_hash_word, &desired_prefix_word)| masked_hash_word == desired_prefix_word)
     }
 
     #[cfg(feature = "opencl")]
     fn estimated_hashes_needed(&self) -> u64 {
-        2u64.saturating_pow(self.mask.iter().map(|word| word.count_ones()).sum())
+        2u64.saturating_pow(
+            self.mask
+                .as_ref()
+                .iter()
+                .map(|word| word.count_ones())
+                .sum(),
+        )
     }
 }
 
-impl Default for HashPrefix {
+impl<H: GitHash> Default for HashPrefix<H> {
     fn default() -> Self {
         HashPrefix::new("0000000").unwrap()
     }
 }
 
-impl HashedCommit {
+impl<H: GitHash> HashedCommit<H> {
     fn new(commit: &[u8]) -> Self {
         Self {
             commit: commit.to_vec(),
-            hash: hash_git_commit(commit),
+            hash: hash_git_commit::<H>(commit),
         }
     }
 }
 
 #[cfg(feature = "opencl")]
 /// Reinterpret a block with 64 8-bit integers as an OpenCL vector with 16 32-bit big-endian integers
-fn encode_into_opencl_vector(data: GenericArray<u8, <Sha1 as BlockInput>::BlockSize>) -> Uint16 {
+fn encode_into_opencl_vector<H: GitHash>(data: H::Block) -> Uint16 {
     let words: [u32; 16] = data
+        .as_ref()
         .chunks(4)
         .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
         .collect::<Vec<_>>()
@@ -666,29 +788,55 @@ fn encode_into_opencl_vector(data: GenericArray<u8, <Sha1 as BlockInput>::BlockS
 }
 
 /// Hashes a commit object using git's object encoding, without adding padding or anything else
-pub fn hash_git_commit(commit: &[u8]) -> String {
-    Sha1::new()
-        .chain(format!("commit {}\0", commit.len()).as_bytes())
-        .chain(commit)
-        .finalize()
-        .iter()
-        .map(|&byte| format!("{:02x}", byte))
-        .collect::<String>()
+pub fn hash_git_commit<H: GitHash>(commit: &[u8]) -> H::State {
+    let mut state = H::INITIAL_STATE;
+    let commit_header = format!("commit {}\0", commit.len()).into_bytes();
+    let commit_data_length = commit_header.len() + commit.len();
+
+    H::compress(
+        &mut state,
+        as_chunks_mut::<H>(
+            commit_header
+                .into_iter()
+                .chain(commit.to_owned().into_iter())
+                .chain(sha_finalization_padding(commit_data_length))
+                .collect::<Vec<_>>()
+                .as_mut(),
+        ),
+    );
+    state
 }
 
 // This is a modified implementation of std::slice::as_chunks_mut. It's copied because the
-// standard library function is not yet stable (and neither are const generics).
-fn as_chunks_mut<T, N: ArrayLength<T>>(slice: &mut [T]) -> (&mut [GenericArray<T, N>], &mut [T]) {
-    let chunk_size = N::to_usize();
-    assert_ne!(chunk_size, 0);
-    let len = slice.len() / chunk_size;
-    let (multiple_of_n, remainder) = slice.split_at_mut(len * chunk_size);
-    let array_slice =
+// standard library function is not yet stable. As a local safety invariant, `Block` is expected
+// to be layout-identical to `[u8; 64]`. (It's a generic parameter because the `GenericArray` subdependency
+// could technically end up being at different versions between the sha1 and sha2 crates, which would cause
+// compile errors if the sha1 version of `GenericArray` gets passed to sha2 methods.
+fn as_chunks_mut<H: GitHash>(slice: &mut [u8]) -> &mut [H::Block] {
+    assert_eq!(size_of::<H::Block>(), 64);
+    assert_eq!(align_of::<H::Block>(), align_of::<u8>());
+    assert_eq!(slice.len() % size_of::<H::Block>(), 0);
+    // SAFETY:
+    // * All of the bytes in the slice are initialized, and the alignment of u8 and [u8; 64]
+    //   are the same.
+    // * The slice length is a multiple of 64, and so the slice's pointer points to
+    //   the same number of elements as the resulting pointer.
+    // * Since `slice` is mutable, its values aren't accessible anywhere else during its lifetime.
+    // * Since the length of the new slice is smaller, it can't overflow beyond isize::MAX.
+    unsafe {
+        from_raw_parts_mut(
+            slice.as_mut_ptr().cast(),
+            slice.len() / size_of::<H::Block>(),
+        )
+    }
+}
 
-        // SAFETY: We cast a slice of `len * N` elements into
-        // a slice of `len` many `N` elements chunks.
-        unsafe { from_raw_parts_mut(multiple_of_n.as_mut_ptr().cast(), len) };
-    (array_slice, remainder)
+// Finalization padding that gets added to the end of data being hashed with sha1 or sha256
+// (the padding happens to be the same for both)
+fn sha_finalization_padding(data_length: usize) -> impl IntoIterator<Item = u8> {
+    once(0x80)
+        .chain(repeat(0).take((55 - data_length as isize).rem_euclid(64) as usize))
+        .chain(<[u8; 8]>::into_iter((data_length as u64 * 8).to_be_bytes()))
 }
 
 // The 256 unique strings of length 8 which contain only ' ' and '\t'.

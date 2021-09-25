@@ -1,6 +1,8 @@
 mod benchmark;
 
-use lucky_commit::{hash_git_commit, HashPrefix, HashSearchWorker, HashedCommit};
+use lucky_commit::{
+    hash_git_commit, GitHash, HashPrefix, HashSearchWorker, HashedCommit, Sha1, Sha256,
+};
 use std::{
     env,
     io::Write,
@@ -15,13 +17,25 @@ fn main() {
         return;
     }
 
-    match args.len() {
-        1 => run_lucky_commit(&HashPrefix::default()),
-        2 => match HashPrefix::new(&args[1]) {
-            Some(prefix) => run_lucky_commit(&prefix),
-            None => print_usage_and_exit(),
-        },
-        _ => print_usage_and_exit(),
+    let existing_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
+    if looks_like_sha256_repository(&existing_commit) {
+        run_lucky_commit(
+            &existing_commit,
+            &match args.len() {
+                1 => HashPrefix::<Sha256>::default(),
+                2 => parse_hash_prefix_or_exit::<Sha256>(&args[1]),
+                _ => print_usage_and_exit(),
+            },
+        )
+    } else {
+        run_lucky_commit(
+            &existing_commit,
+            &match args.len() {
+                1 => HashPrefix::<Sha1>::default(),
+                2 => parse_hash_prefix_or_exit::<Sha1>(&args[1]),
+                _ => print_usage_and_exit(),
+            },
+        )
     }
 }
 
@@ -30,20 +44,19 @@ fn print_usage_and_exit() -> ! {
     exit(1)
 }
 
-fn run_lucky_commit(desired_prefix: &HashPrefix) {
-    let old_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
-
+fn run_lucky_commit<H: GitHash>(existing_commit: &[u8], desired_prefix: &HashPrefix<H>) {
     if let Some(HashedCommit { commit, hash }) =
-        HashSearchWorker::new(&old_commit, desired_prefix.clone()).search()
+        HashSearchWorker::new(existing_commit, desired_prefix.clone()).search()
     {
+        let new_hash_hex = hash.to_string();
         let new_git_oid = spawn_git(
             &["hash-object", "-t", "commit", "-w", "--stdin"],
             Some(&commit),
         );
 
         assert_eq!(
-            hash.as_bytes(),
-            &new_git_oid[0..40],
+            new_hash_hex.as_bytes(),
+            &new_git_oid[0..new_hash_hex.len()],
             "Found a matching commit, but git unexpectedly computed a different hash for it",
         );
 
@@ -55,8 +68,8 @@ fn run_lucky_commit(desired_prefix: &HashPrefix) {
                 "-m",
                 "amend with lucky_commit",
                 "HEAD",
-                &hash,
-                &hash_git_commit(&old_commit),
+                &new_hash_hex,
+                &hash_git_commit::<H>(existing_commit).to_string(),
             ],
             None,
         );
@@ -93,4 +106,21 @@ fn spawn_git(args: &[&str], stdin: Option<&[u8]>) -> Vec<u8> {
     }
 
     output.stdout
+}
+
+fn parse_hash_prefix_or_exit<H: GitHash>(specifier: &str) -> HashPrefix<H> {
+    match HashPrefix::new(specifier) {
+        Some(hash_prefix) => hash_prefix,
+        None => print_usage_and_exit(),
+    }
+}
+
+fn looks_like_sha256_repository(commit: &[u8]) -> bool {
+    // Try to determine whether the repository uses the SHA1 or SHA256 object format, based on
+    // the commit data.
+    // SHA256 repositories are still very experimental, and the way that this gets detected
+    // might need to change in the future when repositories can contain both SHA1 and SHA256
+    // objects. For now, it should be sufficient to parse the `tree` hash from the first line
+    // of the commit.
+    commit.iter().position(|&char| char == b'\n') == Some("tree ".len() + 64)
 }

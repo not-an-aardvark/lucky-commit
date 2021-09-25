@@ -1,3 +1,4 @@
+// Note: A lot of code is duplicated between this file and sha256_prefix_matcher.cl.
 uint16 arrange_padding_block(ulong padding_specifier, uint4 padding_block_ending);
 void sha1_compress(__private uint* h, uint16 w);
 

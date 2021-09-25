@@ -71,7 +71,9 @@ $ pacman -S lucky-commit
 
 ## Performance
 
-`lucky-commit`'s performance is determined by how powerful your computer is, and whether you GPG-sign your commits.
+`lucky-commit`'s performance is determined by how powerful your computer is, whether you GPG-sign your commits, and whether you use experimental git features.
+
+### Hash rate
 
 The main bottleneck is SHA1 throughput. The default hash prefix of `0000000` has length 7, so on average, `lucky-commit` needs to compute 16<sup>7</sup> SHA1 hashes.
 
@@ -83,7 +85,15 @@ The GPU on my 2015 MacBook Pro can compute about 196 million single-block hashes
 
 Outside of hashing, the tool also has to do a constant amount of I/O (e.g. spawning `git` a few times), resulting in an observed average time on my laptop of about 1.6 seconds.
 
+### GPG signatures
+
 For GPG-signed commits, the commit message is part of the signed payload, so `lucky-commit` can't edit the commit message without making the signature invalid. Instead, it adds its whitespace to the end of the signature itself. Since the signature precedes the commit message in git's commit encoding, this requires `lucky-commit` to do more work on each attempt (it can't cache the SHA1 buffer state as effectively, and it needs to rehash the commit message every time). As a result, the performance for GPG-signed commits depends on the length of the commit message. This multiplies the average search time by roughly `1 + ceiling(commit message length / 64 bytes)`.
+
+### SHA256 repositories
+
+Finally, `lucky-commit` also supports git repositories using the [experimental sha256 object format](https://git-scm.com/docs/hash-function-transition/). If `lucky-commit` detects that it's being run in a repository with sha256 objects, it will automatically customize the sha256 shorthash of the commit at `HEAD`, rather than the sha1 shorthash. The hash rate for sha256 is a bit slower than the hash rate for sha1.
+
+If you're wondering whether your repository uses sha256, then it probably doesn't. At the time of writing, this is a highly experimental feature and is very rarely used.
 
 ## Related projects
 
