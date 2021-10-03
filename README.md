@@ -69,6 +69,14 @@ However, if you encounter a linker error along the lines of `/usr/bin/ld: cannot
 $ pacman -S lucky-commit
 ```
 
+#### Funtoo Linux
+
+`lucky-commit` can be installed from [dev-kit](https://github.com/funtoo/dev-kit/tree/1.4-release/dev-util/lucky-commit):
+
+```
+$ emerge dev-util/lucky-commit
+```
+
 ## Performance
 
 `lucky-commit`'s performance is determined by how powerful your computer is, whether you GPG-sign your commits, and whether you use experimental git features.
