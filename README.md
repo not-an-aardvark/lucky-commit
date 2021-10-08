@@ -59,6 +59,23 @@ However, if you encounter a linker error along the lines of `/usr/bin/ld: cannot
 * You can try installing the OpenCL libraries for your system. The instructions for this will vary by OS (see e.g. [here](https://software.intel.com/content/www/us/en/develop/articles/opencl-drivers.html)). Note that this will only be useful if your machine has a GPU.
 * You can try installing an older version of the library written in a different language (see the branches for [Node.js](https://github.com/not-an-aardvark/lucky-commit/tree/nodejs), [C](https://github.com/not-an-aardvark/lucky-commit/tree/C), and [pure Rust without OpenCL](https://github.com/not-an-aardvark/lucky-commit/tree/pure-rust-without-opencl)). Note that these older versions are drastically slower than the current version, and are also unmaintained.
 
+### Docker
+
+If you don't want to install `rustc` and `cargo`, you can build and use a Docker image instead:
+
+```bash
+# Build image
+$ git clone https://github.com/not-an-aardvark/lucky-commit
+$ cd lucky-commit/
+$ docker build -t lucky-commit .
+
+# Add alias to your .bashrc, .zshrc...
+$ alias lucky-commit="docker run -it --rm -v \$(pwd):/root -w /root lucky-commit"
+```
+
+**N.B** The Docker image will run without OpenCL and fall back to a multithreaded CPU implementation, which will be slower (more details above).
+
+
 ### Distro packages
 
 #### Arch Linux
