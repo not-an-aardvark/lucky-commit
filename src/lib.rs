@@ -450,7 +450,7 @@ impl<H: GitHash> HashSearchWorker<H> {
                     .copy_host_slice(partially_hashed_commit.intermediate_state.as_ref())
                     .build()?,
             )
-            .arg_named(BASE_PADDING_SPECIFIER_ARG, 0) // filled in later
+            .arg_named(BASE_PADDING_SPECIFIER_ARG, 0u64) // filled in later
             .arg(
                 &Buffer::builder()
                     .queue(queue.clone())
