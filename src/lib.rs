@@ -1,3 +1,11 @@
+//! The underlying API of lucky_commit is also exposed as a Rust library, in case anyone
+//! wants to use it programmatically. However, note that the library API is considered
+//! unstable, and might have backwards-incompatible changes even in minor or patch
+//! releases of the crate. If you use the library interface, pinning to an exact version
+//! is recommended.
+
+#![deny(missing_docs)]
+
 use std::{
     cmp::Ord,
     fmt::Debug,
