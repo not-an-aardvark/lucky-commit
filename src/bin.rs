@@ -1,8 +1,6 @@
 mod benchmark;
 
-use lucky_commit::{
-    hash_git_commit, GitHash, HashPrefix, HashSearchWorker, HashedCommit, Sha1, Sha256,
-};
+use lucky_commit::{GitCommit, GitHash, HashPrefix, HashSearchWorker, Sha1, Sha256};
 use std::{
     env,
     io::Write,
@@ -45,18 +43,18 @@ fn print_usage_and_exit() -> ! {
 }
 
 fn run_lucky_commit<H: GitHash>(existing_commit: &[u8], desired_prefix: &HashPrefix<H>) {
-    if let Some(HashedCommit { commit, hash }) =
+    if let Some(found_commit) =
         HashSearchWorker::new(existing_commit, desired_prefix.clone()).search()
     {
-        let new_hash_hex = hash.to_string();
+        let new_hash = found_commit.hex_hash();
         let new_git_oid = spawn_git(
             &["hash-object", "-t", "commit", "-w", "--stdin"],
-            Some(&commit),
+            Some(found_commit.object()),
         );
 
         assert_eq!(
-            new_hash_hex.as_bytes(),
-            &new_git_oid[0..new_hash_hex.len()],
+            new_hash.as_bytes(),
+            &new_git_oid[0..new_hash.len()],
             "Found a matching commit, but git unexpectedly computed a different hash for it",
         );
 
@@ -68,8 +66,8 @@ fn run_lucky_commit<H: GitHash>(existing_commit: &[u8], desired_prefix: &HashPre
                 "-m",
                 "amend with lucky_commit",
                 "HEAD",
-                &new_hash_hex,
-                &hash_git_commit::<H>(existing_commit).to_string(),
+                &new_hash,
+                &GitCommit::<H>::new(existing_commit).hex_hash(),
             ],
             None,
         );

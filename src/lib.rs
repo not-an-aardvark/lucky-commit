@@ -1,3 +1,16 @@
+use std::{
+    cmp::Ord,
+    fmt::Debug,
+    iter::{once, repeat},
+    mem::{align_of, size_of},
+    ops::Range,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
+    thread::{spawn, JoinHandle},
+};
+
 #[cfg(feature = "opencl")]
 use ocl::{
     builders::DeviceSpecifier::TypeFlags,
@@ -5,21 +18,8 @@ use ocl::{
     prm::Uint16,
     Buffer, Context, Kernel, Platform, Program, Queue,
 };
-use std::{
-    array::TryFromSliceError,
-    cmp::Ord,
-    convert::{TryFrom, TryInto},
-    fmt::Debug,
-    iter::{once, repeat},
-    mem::{align_of, size_of},
-    ops::Range,
-    slice::from_raw_parts_mut,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
-    },
-    thread::{spawn, JoinHandle},
-};
+#[cfg(feature = "opencl")]
+use std::convert::TryInto;
 
 /// A worker that, when invoked, will look in a predetermined search space to find a modification
 /// to a specific commit that matches a specific hash prefix.
@@ -28,20 +28,6 @@ pub struct HashSearchWorker<H: GitHash> {
     processed_commit: ProcessedCommit,
     desired_prefix: HashPrefix<H>,
     search_space: Range<u64>,
-}
-
-/// Defines a desired target prefix for a commit hash.
-#[derive(Debug, PartialEq, Clone)]
-pub struct HashPrefix<H: GitHash> {
-    /// The prefix, as split into big-endian four-byte chunks.
-    /// All bits beyond the length of the prefix are set to 0.
-    data: H::State,
-    /// Mask containing bits set to 1 if the bit at that position is specified
-    /// in the prefix, and 0 otherwise.
-    mask: H::State,
-    // For example, the hash prefix "deadbeef123" corresponds to the
-    // following structure:
-    //   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
 }
 
 // The fully padded data that gets hashed is the concatenation of all the following:
@@ -118,14 +104,28 @@ struct PartiallyHashedCommit<'a, H: GitHash> {
     dynamic_blocks: &'a mut [H::Block],
 }
 
-/// The result of a successful hash search
-#[derive(Debug, PartialEq, Eq)]
-pub struct HashedCommit<H: GitHash> {
-    /// The git commit that has the desired hash
-    pub commit: Vec<u8>,
+/// Defines a desired target prefix for a commit hash.
+#[derive(Debug, PartialEq, Clone)]
+pub struct HashPrefix<H: GitHash> {
+    /// The prefix, as split into big-endian four-byte chunks.
+    /// All bits beyond the length of the prefix are set to 0.
+    data: H::State,
+    /// Mask containing bits set to 1 if the bit at that position is specified
+    /// in the prefix, and 0 otherwise.
+    mask: H::State,
+    // For example, the hash prefix "deadbeef123" corresponds to the
+    // following structure:
+    //   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
+}
 
-    /// The hash of the commit, as a hex string
-    pub hash: H::State,
+/// A git commit
+#[derive(Debug, PartialEq, Eq)]
+pub struct GitCommit<H: GitHash> {
+    /// The commit data, represented in git's object format
+    object: Vec<u8>,
+
+    /// The hash of the commit
+    hash: H::State,
 }
 
 /// A hash function used by git. This is a sealed trait implemented by `Sha1` and `Sha256`.
@@ -133,27 +133,18 @@ pub struct HashedCommit<H: GitHash> {
 /// the types implementing the trait are opaque.
 pub trait GitHash: private::Sealed + Debug + Send + Clone + Eq + 'static {
     /// The type of the output and intermediate state of this hash function.
-    /// Ideally this trait would just have an associated const for the length of the state vector,
-    /// and then `State` would be defined as `[u32; N]`, but this isn't possible due
+    /// For sha1 and sha256, this is [u32; N] for some N. Ideally this trait would just
+    /// have an associated const for the length of the state vector, and then
+    /// `State` would be defined as `[u32; N]`, but this isn't possible due
     /// to https://github.com/rust-lang/rust/issues/60551.
-    /// Instead, a `StateVector<N>` wrapper type is used, which is effectively the same
-    /// thing, but requires manual trait implementations and results in marginally
-    /// less type safety in HashPrefix::new.
-    type State: AsRef<[u32]>
-        + Clone
-        + Copy
-        + Debug
-        + Eq
-        + Send
-        + ToString
-        + for<'a> TryFrom<&'a [u32], Error = TryFromSliceError>;
+    type State: AsRef<[u32]> + AsMut<[u32]> + Clone + Copy + Debug + Default + Eq + Send;
 
     /// The initial value of the state vector for the given algorithm
     const INITIAL_STATE: Self::State;
 
-    /// The datatype representing a block for this algorithm. This is equivalent to [u8; 64]
-    /// for both SHA1 and SHA256, although the nominal type that gets used might be different
-    /// on a per-library basis due to const generic limitations.
+    /// The datatype representing a block for this algorithm. This must be layout-equivalent
+    /// to [u8; 64], although the nominal type that gets used might be different on a
+    /// per-library basis due to const generic limitations.
     type Block: AsRef<[u8]> + AsMut<[u8]> + Copy + Debug;
 
     /// Processes a set of blocks using the given algorithm
@@ -168,7 +159,7 @@ pub trait GitHash: private::Sealed + Debug + Send + Clone + Eq + 'static {
     /// 1. A pointer to the `mask` of the desired hash prefix
     /// 1. The "base padding specifier" for the current run, which determines which padding will
     ///    be attempted. The padding specifier used by any given thread is equal to the base
-    ///    specifier offset by that thread's ID.
+    ///    specifier plus that thread's ID.
     /// 1. A pointer to the intermediate state after all static blocks have been hashed
     /// 1. A pointer to the dynamic blocks, encoded as big-endian 32-bit integers
     /// 1. The number of dynamic blocks that are present
@@ -182,15 +173,14 @@ pub trait GitHash: private::Sealed + Debug + Send + Clone + Eq + 'static {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Sha1 {}
 impl GitHash for Sha1 {
-    type State = StateVector<5>;
+    type State = [u32; 5];
 
-    const INITIAL_STATE: Self::State =
-        StateVector([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0]);
+    const INITIAL_STATE: Self::State = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
     type Block =
         sha1::digest::generic_array::GenericArray<u8, sha1::digest::generic_array::typenum::U64>;
 
     fn compress(state: &mut Self::State, blocks: &[Self::Block]) {
-        sha1::compress(&mut state.0, blocks)
+        sha1::compress(state, blocks)
     }
 
     #[cfg(feature = "opencl")]
@@ -202,17 +192,17 @@ impl GitHash for Sha1 {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Sha256 {}
 impl GitHash for Sha256 {
-    type State = StateVector<8>;
+    type State = [u32; 8];
 
-    const INITIAL_STATE: Self::State = StateVector([
+    const INITIAL_STATE: Self::State = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
         0x5be0cd19,
-    ]);
+    ];
     type Block =
         sha2::digest::generic_array::GenericArray<u8, sha2::digest::generic_array::typenum::U64>;
 
     fn compress(state: &mut Self::State, blocks: &[Self::Block]) {
-        sha2::compress256(&mut state.0, blocks)
+        sha2::compress256(state, blocks)
     }
 
     #[cfg(feature = "opencl")]
@@ -223,30 +213,6 @@ mod private {
     pub trait Sealed {}
     impl Sealed for super::Sha1 {}
     impl Sealed for super::Sha256 {}
-}
-
-/// The output data for a given hash function. `N` is the number of 32-bit words in the length.
-/// Sha1 outputs consist of 5 32-bit words. Sha256 outputs consist of 8 32-bit words.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StateVector<const N: usize>([u32; N]);
-
-impl<const N: usize> AsRef<[u32]> for StateVector<N> {
-    fn as_ref(&self) -> &[u32] {
-        self.0.as_ref()
-    }
-}
-
-impl<'a, const N: usize> TryFrom<&'a [u32]> for StateVector<N> {
-    type Error = <[u32; N] as TryFrom<&'a [u32]>>::Error;
-    fn try_from(value: &'_ [u32]) -> Result<Self, Self::Error> {
-        <[u32; N]>::try_from(value).map(Self)
-    }
-}
-
-impl<const N: usize> ToString for StateVector<N> {
-    fn to_string(&self) -> String {
-        self.0.iter().map(|word| format!("{:08x}", word)).collect()
-    }
 }
 
 impl<H: GitHash> HashSearchWorker<H> {
@@ -293,9 +259,9 @@ impl<H: GitHash> HashSearchWorker<H> {
         })
     }
 
-    /// Invokes the worker. The worker will return early with a hash match if it finds one,
-    /// otherwise it will search its entire search space and return `None`.
-    pub fn search(self) -> Option<HashedCommit<H>> {
+    /// Invokes the worker. The worker will return a git commit matching the hash,
+    /// if it finds one. Otherwise, it will return None after exhausing its entire search space.
+    pub fn search(self) -> Option<GitCommit<H>> {
         #[cfg(feature = "opencl")]
         if Self::gpus_available() {
             return self.search_with_gpu().unwrap();
@@ -314,7 +280,7 @@ impl<H: GitHash> HashSearchWorker<H> {
     }
 
     #[allow(clippy::needless_collect)]
-    fn search_with_cpus(self) -> Option<HashedCommit<H>> {
+    fn search_with_cpus(self) -> Option<GitCommit<H>> {
         let thread_count = num_cpus::get_physical();
         let lame_duck_cancel_signal = Arc::new(AtomicBool::new(false));
         let (shared_sender, receiver) = mpsc::channel();
@@ -358,7 +324,7 @@ impl<H: GitHash> HashSearchWorker<H> {
     fn search_with_cpu_single_threaded(
         self,
         lame_duck_cancel_signal: Arc<AtomicBool>,
-    ) -> Option<HashedCommit<H>> {
+    ) -> Option<GitCommit<H>> {
         let HashSearchWorker {
             search_space,
             desired_prefix,
@@ -372,7 +338,7 @@ impl<H: GitHash> HashSearchWorker<H> {
             for index_in_interval in 0..lame_duck_check_interval {
                 partially_hashed_commit.scatter_padding(base_padding_specifier + index_in_interval);
                 if desired_prefix.matches(&partially_hashed_commit.current_hash()) {
-                    return Some(HashedCommit::new(processed_commit.commit()));
+                    return Some(GitCommit::new(processed_commit.commit()));
                 }
             }
 
@@ -385,7 +351,7 @@ impl<H: GitHash> HashSearchWorker<H> {
     }
 
     #[cfg(feature = "opencl")]
-    fn search_with_gpu(self) -> ocl::Result<Option<HashedCommit<H>>> {
+    fn search_with_gpu(self) -> ocl::Result<Option<GitCommit<H>>> {
         let HashSearchWorker {
             search_space,
             desired_prefix,
@@ -503,7 +469,7 @@ impl<H: GitHash> HashSearchWorker<H> {
                     successful_padding_specifier,
                 );
 
-                return Ok(Some(HashedCommit::new(processed_commit.commit())));
+                return Ok(Some(GitCommit::new(processed_commit.commit())));
             }
         }
 
@@ -717,23 +683,18 @@ impl<H: GitHash> HashPrefix<H> {
             return None;
         }
 
-        let mut data = Vec::new();
-        let mut mask = Vec::new();
+        let mut data = H::State::default();
+        let mut mask = H::State::default();
 
-        for chunk in prefix.as_bytes().chunks(8) {
+        for (i, chunk) in prefix.as_bytes().chunks(8).enumerate() {
             let value =
                 u32::from_str_radix(&String::from_utf8(chunk.to_vec()).unwrap(), 16).unwrap();
             let num_unspecified_bits = 32 - 4 * chunk.len();
-            data.push(value << num_unspecified_bits);
-            mask.push(u32::MAX >> num_unspecified_bits << num_unspecified_bits);
+            data.as_mut()[i] = value << num_unspecified_bits;
+            mask.as_mut()[i] = u32::MAX >> num_unspecified_bits << num_unspecified_bits;
         }
-        data.resize(num_words, 0);
-        mask.resize(num_words, 0);
 
-        Some(HashPrefix {
-            data: data[..].try_into().unwrap(),
-            mask: mask[..].try_into().unwrap(),
-        })
+        Some(HashPrefix { data, mask })
     }
 
     #[inline(always)]
@@ -764,12 +725,45 @@ impl<H: GitHash> Default for HashPrefix<H> {
     }
 }
 
-impl<H: GitHash> HashedCommit<H> {
-    fn new(commit: &[u8]) -> Self {
+impl<H: GitHash> GitCommit<H> {
+    /// Constructs a GitCommit from the given commit data. The data is assumed to be in
+    /// git's object format, but this is not technically required.
+    pub fn new(commit: &[u8]) -> Self {
         Self {
-            commit: commit.to_vec(),
-            hash: hash_git_commit::<H>(commit),
+            object: commit.to_vec(),
+            hash: {
+                let mut state = H::INITIAL_STATE;
+                let commit_header = format!("commit {}\0", commit.len()).into_bytes();
+                let commit_data_length = commit_header.len() + commit.len();
+
+                H::compress(
+                    &mut state,
+                    as_chunks_mut::<H>(
+                        commit_header
+                            .into_iter()
+                            .chain(commit.to_owned().into_iter())
+                            .chain(sha_finalization_padding(commit_data_length))
+                            .collect::<Vec<_>>()
+                            .as_mut(),
+                    ),
+                );
+                state
+            },
         }
+    }
+
+    /// The git object data for this commit
+    pub fn object(&self) -> &[u8] {
+        &self.object
+    }
+
+    /// The hash of this commit, as a hex string
+    pub fn hex_hash(&self) -> String {
+        self.hash
+            .as_ref()
+            .iter()
+            .map(|word| format!("{:08x}", word))
+            .collect()
     }
 }
 
@@ -785,26 +779,6 @@ fn encode_into_opencl_vector<H: GitHash>(data: H::Block) -> Uint16 {
         .unwrap();
 
     words.into()
-}
-
-/// Hashes a commit object using git's object encoding, without adding padding or anything else
-pub fn hash_git_commit<H: GitHash>(commit: &[u8]) -> H::State {
-    let mut state = H::INITIAL_STATE;
-    let commit_header = format!("commit {}\0", commit.len()).into_bytes();
-    let commit_data_length = commit_header.len() + commit.len();
-
-    H::compress(
-        &mut state,
-        as_chunks_mut::<H>(
-            commit_header
-                .into_iter()
-                .chain(commit.to_owned().into_iter())
-                .chain(sha_finalization_padding(commit_data_length))
-                .collect::<Vec<_>>()
-                .as_mut(),
-        ),
-    );
-    state
 }
 
 // This is a modified implementation of std::slice::as_chunks_mut. It's copied because the
@@ -824,7 +798,7 @@ fn as_chunks_mut<H: GitHash>(slice: &mut [u8]) -> &mut [H::Block] {
     // * Since `slice` is mutable, its values aren't accessible anywhere else during its lifetime.
     // * Since the length of the new slice is smaller, it can't overflow beyond isize::MAX.
     unsafe {
-        from_raw_parts_mut(
+        std::slice::from_raw_parts_mut(
             slice.as_mut_ptr().cast(),
             slice.len() / size_of::<H::Block>(),
         )
