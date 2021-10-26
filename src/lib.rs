@@ -24,7 +24,7 @@ use std::convert::TryInto;
 /// A worker that, when invoked, will look in a predetermined search space to find a modification
 /// to a specific commit that matches a specific hash prefix.
 #[derive(Debug, PartialEq)]
-pub struct HashSearchWorker<H: GitHash> {
+pub struct HashSearchWorker<H: GitHashFn> {
     processed_commit: ProcessedCommit,
     desired_prefix: HashPrefix<H>,
     search_space: Range<u64>,
@@ -99,14 +99,14 @@ struct ProcessedCommit {
 /// padding. This drastically reduces the number of blocks that need to be processed, resulting in a
 /// ~5x end-to-end performance improvement for an average-sized commit.
 #[derive(Debug)]
-struct PartiallyHashedCommit<'a, H: GitHash> {
+struct PartiallyHashedCommit<'a, H: GitHashFn> {
     intermediate_state: H::State,
     dynamic_blocks: &'a mut [H::Block],
 }
 
 /// Defines a desired target prefix for a commit hash.
 #[derive(Debug, PartialEq, Clone)]
-pub struct HashPrefix<H: GitHash> {
+pub struct HashPrefix<H: GitHashFn> {
     /// The prefix, as split into big-endian four-byte chunks.
     /// All bits beyond the length of the prefix are set to 0.
     data: H::State,
@@ -120,7 +120,7 @@ pub struct HashPrefix<H: GitHash> {
 
 /// A git commit
 #[derive(Debug, PartialEq, Eq)]
-pub struct GitCommit<H: GitHash> {
+pub struct GitCommit<H: GitHashFn> {
     /// The commit data, represented in git's object format
     object: Vec<u8>,
 
@@ -131,7 +131,7 @@ pub struct GitCommit<H: GitHash> {
 /// A hash function used by git. This is a sealed trait implemented by `Sha1` and `Sha256`.
 /// The fields and methods on this trait are subject to change. Consumers should pretend that
 /// the types implementing the trait are opaque.
-pub trait GitHash: private::Sealed + Debug + Send + Clone + Eq + 'static {
+pub trait GitHashFn: private::Sealed + Debug + Send + Clone + Eq + 'static {
     /// The type of the output and intermediate state of this hash function.
     /// For sha1 and sha256, this is [u32; N] for some N. Ideally this trait would just
     /// have an associated const for the length of the state vector, and then
@@ -172,7 +172,7 @@ pub trait GitHash: private::Sealed + Debug + Send + Clone + Eq + 'static {
 /// This type is uninhabited, and is only intended to be used as a type parameter.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Sha1 {}
-impl GitHash for Sha1 {
+impl GitHashFn for Sha1 {
     type State = [u32; 5];
 
     const INITIAL_STATE: Self::State = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
@@ -191,7 +191,7 @@ impl GitHash for Sha1 {
 /// This type is uninhabited, and is only intended to be used as a type parameter.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Sha256 {}
-impl GitHash for Sha256 {
+impl GitHashFn for Sha256 {
     type State = [u32; 8];
 
     const INITIAL_STATE: Self::State = [
@@ -215,7 +215,7 @@ mod private {
     impl Sealed for super::Sha256 {}
 }
 
-impl<H: GitHash> HashSearchWorker<H> {
+impl<H: GitHashFn> HashSearchWorker<H> {
     /// Creates a worker for a specific commit and prefix, with an initial
     /// workload of 1 ** 48 units. As a rough approximation depending on hardware,
     /// each worker can perform about 7 million units of work per second.
@@ -622,7 +622,7 @@ impl ProcessedCommit {
         &self.data[self.commit_range.clone()]
     }
 
-    fn as_partially_hashed_commit<H: GitHash>(&mut self) -> PartiallyHashedCommit<H> {
+    fn as_partially_hashed_commit<H: GitHashFn>(&mut self) -> PartiallyHashedCommit<H> {
         let (static_blocks, dynamic_blocks) =
             as_chunks_mut::<H>(&mut self.data[..]).split_at_mut(self.num_static_blocks);
 
@@ -636,7 +636,7 @@ impl ProcessedCommit {
     }
 }
 
-impl<'a, H: GitHash> PartiallyHashedCommit<'a, H> {
+impl<'a, H: GitHashFn> PartiallyHashedCommit<'a, H> {
     #[inline(always)]
     fn dynamic_padding_mut(&mut self) -> &mut [u8] {
         &mut self.dynamic_blocks[0].as_mut()[..48]
@@ -666,7 +666,7 @@ impl<'a, H: GitHash> PartiallyHashedCommit<'a, H> {
     }
 }
 
-impl<H: GitHash> HashPrefix<H> {
+impl<H: GitHashFn> HashPrefix<H> {
     /// Creates a new hash prefix from a hex string, which is at most 40 characters.
     /// Returns `None` if the supplied prefix was invalid.
     pub fn new(prefix: &str) -> Option<Self> {
@@ -719,13 +719,13 @@ impl<H: GitHash> HashPrefix<H> {
     }
 }
 
-impl<H: GitHash> Default for HashPrefix<H> {
+impl<H: GitHashFn> Default for HashPrefix<H> {
     fn default() -> Self {
         HashPrefix::new("0000000").unwrap()
     }
 }
 
-impl<H: GitHash> GitCommit<H> {
+impl<H: GitHashFn> GitCommit<H> {
     /// Constructs a GitCommit from the given commit data. The data is assumed to be in
     /// git's object format, but this is not technically required.
     pub fn new(commit: &[u8]) -> Self {
@@ -769,7 +769,7 @@ impl<H: GitHash> GitCommit<H> {
 
 #[cfg(feature = "opencl")]
 /// Reinterpret a block with 64 8-bit integers as an OpenCL vector with 16 32-bit big-endian integers
-fn encode_into_opencl_vector<H: GitHash>(data: H::Block) -> Uint16 {
+fn encode_into_opencl_vector<H: GitHashFn>(data: H::Block) -> Uint16 {
     let words: [u32; 16] = data
         .as_ref()
         .chunks(4)
@@ -786,7 +786,7 @@ fn encode_into_opencl_vector<H: GitHash>(data: H::Block) -> Uint16 {
 // to be layout-identical to `[u8; 64]`. (It's a generic parameter because the `GenericArray` subdependency
 // could technically end up being at different versions between the sha1 and sha2 crates, which would cause
 // compile errors if the sha1 version of `GenericArray` gets passed to sha2 methods.
-fn as_chunks_mut<H: GitHash>(slice: &mut [u8]) -> &mut [H::Block] {
+fn as_chunks_mut<H: GitHashFn>(slice: &mut [u8]) -> &mut [H::Block] {
     assert_eq!(size_of::<H::Block>(), 64);
     assert_eq!(align_of::<H::Block>(), align_of::<u8>());
     assert_eq!(slice.len() % size_of::<H::Block>(), 0);

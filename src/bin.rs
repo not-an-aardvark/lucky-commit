@@ -1,6 +1,6 @@
 mod benchmark;
 
-use lucky_commit::{GitCommit, GitHash, HashPrefix, HashSearchWorker, Sha1, Sha256};
+use lucky_commit::{GitCommit, GitHashFn, HashPrefix, HashSearchWorker, Sha1, Sha256};
 use std::{
     env,
     io::Write,
@@ -42,7 +42,7 @@ fn print_usage_and_exit() -> ! {
     exit(1)
 }
 
-fn run_lucky_commit<H: GitHash>(existing_commit: &[u8], desired_prefix: &HashPrefix<H>) {
+fn run_lucky_commit<H: GitHashFn>(existing_commit: &[u8], desired_prefix: &HashPrefix<H>) {
     if let Some(found_commit) =
         HashSearchWorker::new(existing_commit, desired_prefix.clone()).search()
     {
@@ -106,7 +106,7 @@ fn spawn_git(args: &[&str], stdin: Option<&[u8]>) -> Vec<u8> {
     output.stdout
 }
 
-fn parse_hash_prefix_or_exit<H: GitHash>(specifier: &str) -> HashPrefix<H> {
+fn parse_hash_prefix_or_exit<H: GitHashFn>(specifier: &str) -> HashPrefix<H> {
     match HashPrefix::new(specifier) {
         Some(hash_prefix) => hash_prefix,
         None => print_usage_and_exit(),
