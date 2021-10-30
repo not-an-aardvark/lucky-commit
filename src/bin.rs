@@ -1,51 +1,47 @@
 mod benchmark;
 
-use lucky_commit::{GitCommit, GitHashFn, HashPrefix, HashSearchWorker, Sha1, Sha256};
+use lucky_commit::{
+    GitCommit, GitHashFn, HashPrefix, HashSearchWorker, ParseHashPrefixErr, Sha1, Sha256,
+};
 use std::{
     env,
     io::Write,
     process::{exit, Command, Stdio},
 };
 
-fn main() {
+fn main() -> Result<(), ParseHashPrefixErr> {
     let args = env::args().collect::<Vec<String>>();
-
-    if args.len() == 2 && args[1] == "--benchmark" {
-        benchmark::run_benchmark();
-        return;
-    }
+    let prefix_spec = match args.as_slice() {
+        [_, arg] if arg == "--benchmark" => {
+            benchmark::run_benchmark();
+            exit(0)
+        }
+        [_, prefix] => Some(prefix.as_str()),
+        [_] => None,
+        _ => {
+            eprintln!("Usage: lucky_commit [commit-hash-prefix]");
+            exit(1)
+        }
+    };
 
     let existing_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
     if looks_like_sha256_repository(&existing_commit) {
-        run_lucky_commit(
-            &existing_commit,
-            &match args.len() {
-                1 => HashPrefix::<Sha256>::default(),
-                2 => parse_hash_prefix_or_exit::<Sha256>(&args[1]),
-                _ => print_usage_and_exit(),
-            },
-        )
+        run_lucky_commit::<Sha256>(&existing_commit, prefix_spec)
     } else {
-        run_lucky_commit(
-            &existing_commit,
-            &match args.len() {
-                1 => HashPrefix::<Sha1>::default(),
-                2 => parse_hash_prefix_or_exit::<Sha1>(&args[1]),
-                _ => print_usage_and_exit(),
-            },
-        )
+        run_lucky_commit::<Sha1>(&existing_commit, prefix_spec)
     }
 }
 
-fn print_usage_and_exit() -> ! {
-    eprintln!("Usage: lucky_commit [commit-hash-prefix]");
-    exit(1)
-}
+fn run_lucky_commit<H: GitHashFn>(
+    existing_commit: &[u8],
+    prefix_spec: Option<&str>,
+) -> Result<(), ParseHashPrefixErr> {
+    let desired_prefix = prefix_spec
+        .map(str::parse::<HashPrefix<H>>)
+        .transpose()?
+        .unwrap_or_default();
 
-fn run_lucky_commit<H: GitHashFn>(existing_commit: &[u8], desired_prefix: &HashPrefix<H>) {
-    if let Some(found_commit) =
-        HashSearchWorker::new(existing_commit, desired_prefix.clone()).search()
-    {
+    if let Some(found_commit) = HashSearchWorker::new(existing_commit, desired_prefix).search() {
         let new_hash = found_commit.hex_hash();
         let new_git_oid = spawn_git(
             &["hash-object", "-t", "commit", "-w", "--stdin"],
@@ -71,6 +67,8 @@ fn run_lucky_commit<H: GitHashFn>(existing_commit: &[u8], desired_prefix: &HashP
             ],
             None,
         );
+
+        Ok(())
     } else {
         eprintln!(
             "Sorry, failed to find a commit matching the given prefix despite searching hundreds \
@@ -104,13 +102,6 @@ fn spawn_git(args: &[&str], stdin: Option<&[u8]>) -> Vec<u8> {
     }
 
     output.stdout
-}
-
-fn parse_hash_prefix_or_exit<H: GitHashFn>(specifier: &str) -> HashPrefix<H> {
-    match HashPrefix::new(specifier) {
-        Some(hash_prefix) => hash_prefix,
-        None => print_usage_and_exit(),
-    }
 }
 
 fn looks_like_sha256_repository(commit: &[u8]) -> bool {

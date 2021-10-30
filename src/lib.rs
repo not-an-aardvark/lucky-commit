@@ -8,10 +8,12 @@
 
 use std::{
     cmp::Ord,
-    fmt::Debug,
+    error::Error,
+    fmt::{Debug, Display, Formatter},
     iter::{once, repeat},
     mem::{align_of, size_of},
     ops::Range,
+    str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
@@ -124,6 +126,16 @@ pub struct HashPrefix<H: GitHashFn> {
     // For example, the hash prefix "deadbeef123" corresponds to the
     // following structure:
     //   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
+}
+
+/// An error that results from parsing an invalid HashPrefix
+#[non_exhaustive]
+#[derive(PartialEq, Eq)]
+pub enum ParseHashPrefixErr {
+    /// The prefix is longer than a hash with the specified algorithm
+    TooLong,
+    /// The prefix contains characters which are not valid hex characters
+    OnlyHexCharactersAllowed,
 }
 
 /// A git commit
@@ -675,36 +687,6 @@ impl<'a, H: GitHashFn> PartiallyHashedCommit<'a, H> {
 }
 
 impl<H: GitHashFn> HashPrefix<H> {
-    /// Creates a new hash prefix from a hex string, which is at most 40 characters.
-    /// Returns `None` if the supplied prefix was invalid.
-    pub fn new(prefix: &str) -> Option<Self> {
-        let num_words = H::INITIAL_STATE.as_ref().len();
-        if prefix.len() > num_words * 8 {
-            return None;
-        }
-
-        let contains_only_valid_characters = prefix.chars().all(|c| {
-            ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
-        });
-
-        if !contains_only_valid_characters {
-            return None;
-        }
-
-        let mut data = H::State::default();
-        let mut mask = H::State::default();
-
-        for (i, chunk) in prefix.as_bytes().chunks(8).enumerate() {
-            let value =
-                u32::from_str_radix(&String::from_utf8(chunk.to_vec()).unwrap(), 16).unwrap();
-            let num_unspecified_bits = 32 - 4 * chunk.len();
-            data.as_mut()[i] = value << num_unspecified_bits;
-            mask.as_mut()[i] = u32::MAX >> num_unspecified_bits << num_unspecified_bits;
-        }
-
-        Some(HashPrefix { data, mask })
-    }
-
     #[inline(always)]
     fn matches(&self, hash: &H::State) -> bool {
         hash.as_ref()
@@ -727,9 +709,55 @@ impl<H: GitHashFn> HashPrefix<H> {
     }
 }
 
+impl<H: GitHashFn> FromStr for HashPrefix<H> {
+    type Err = ParseHashPrefixErr;
+    fn from_str(prefix: &str) -> Result<Self, Self::Err> {
+        let num_words = H::INITIAL_STATE.as_ref().len();
+        if prefix.len() > num_words * 8 {
+            return Err(ParseHashPrefixErr::TooLong);
+        }
+
+        let contains_only_valid_characters = prefix.chars().all(|c| {
+            ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
+        });
+
+        if !contains_only_valid_characters {
+            return Err(ParseHashPrefixErr::OnlyHexCharactersAllowed);
+        }
+
+        let mut data = H::State::default();
+        let mut mask = H::State::default();
+
+        for (i, chunk) in prefix.as_bytes().chunks(8).enumerate() {
+            let value =
+                u32::from_str_radix(&String::from_utf8(chunk.to_vec()).unwrap(), 16).unwrap();
+            let num_unspecified_bits = 32 - 4 * chunk.len();
+            data.as_mut()[i] = value << num_unspecified_bits;
+            mask.as_mut()[i] = u32::MAX >> num_unspecified_bits << num_unspecified_bits;
+        }
+
+        Ok(HashPrefix { data, mask })
+    }
+}
+
 impl<H: GitHashFn> Default for HashPrefix<H> {
     fn default() -> Self {
-        HashPrefix::new("0000000").unwrap()
+        "0000000".parse().unwrap()
+    }
+}
+
+impl Error for ParseHashPrefixErr {}
+impl Display for ParseHashPrefixErr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::TooLong => write!(f, "hash prefix can't be longer than an actual hash"),
+            Self::OnlyHexCharactersAllowed => write!(f, "hash prefix contains invalid characters"),
+        }
+    }
+}
+impl Debug for ParseHashPrefixErr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <Self as Display>::fmt(self, f)
     }
 }
 

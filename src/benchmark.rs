@@ -1,4 +1,4 @@
-use lucky_commit::{HashPrefix, HashSearchWorker, Sha1};
+use lucky_commit::{HashSearchWorker, Sha1};
 
 pub fn run_benchmark() {
     // Runs a benchmark for performance testing. This does a constant hash search. This benchmark
@@ -14,14 +14,14 @@ pub fn run_benchmark() {
     //
     // To use: run `time target/release/lucky_commit --benchmark`.
     assert_eq!(
-        HashSearchWorker::new(
+        HashSearchWorker::<Sha1>::new(
             b"\
                 tree 6f4e79123e206448f80ec73b9a53e07eb0784fef\n\
                 author Foo Bar <foo@example.com> 1611912738 -0500\n\
                 committer Foo Bar <foo@example.com> 1611912738 -0500\n\
                 \n\
                 Test commit for benchmarking performance changes\n",
-            HashPrefix::<Sha1>::new("000000000000000000000000000000000000000").unwrap(),
+            "000000000000000000000000000000000000000".parse().unwrap(),
         )
         .with_capped_search_space(1 << 28)
         .search(),
