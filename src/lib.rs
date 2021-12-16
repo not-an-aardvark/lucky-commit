@@ -196,8 +196,7 @@ impl GitHashFn for Sha1 {
     type State = [u32; 5];
 
     const INITIAL_STATE: Self::State = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
-    type Block =
-        sha1::digest::generic_array::GenericArray<u8, sha1::digest::generic_array::typenum::U64>;
+    type Block = sha1::digest::core_api::Block<sha1::Sha1Core>;
 
     fn compress(state: &mut Self::State, blocks: &[Self::Block]) {
         sha1::compress(state, blocks)
@@ -218,8 +217,7 @@ impl GitHashFn for Sha256 {
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
         0x5be0cd19,
     ];
-    type Block =
-        sha2::digest::generic_array::GenericArray<u8, sha2::digest::generic_array::typenum::U64>;
+    type Block = sha2::digest::core_api::Block<sha2::Sha256>;
 
     fn compress(state: &mut Self::State, blocks: &[Self::Block]) {
         sha2::compress256(state, blocks)
