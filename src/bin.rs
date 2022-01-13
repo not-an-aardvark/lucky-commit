@@ -16,27 +16,58 @@ fn main() -> Result<(), ParseHashPrefixErr> {
             benchmark::run_benchmark();
             exit(0)
         }
-        [_, prefix] => Some(prefix.as_str()),
+        [_, arg] if arg == "--auto" => {
+            spawn_git_silent(&["rev-parse", "-q", "--short", "HEAD^"], None)
+                .and_then(get_next_prefix)
+        }
+        [_, prefix] => Some(prefix.to_owned()),
         [_] => None,
         _ => {
-            eprintln!("Usage: lucky_commit [commit-hash-prefix]");
+            eprintln!("Usage: lucky_commit [--auto | commit-hash-prefix]");
             exit(1)
         }
     };
 
     let existing_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
     if looks_like_sha256_repository(&existing_commit) {
-        run_lucky_commit::<Sha256>(&existing_commit, prefix_spec)
+        run_lucky_commit::<Sha256>(&existing_commit, &prefix_spec)
     } else {
-        run_lucky_commit::<Sha1>(&existing_commit, prefix_spec)
+        run_lucky_commit::<Sha1>(&existing_commit, &prefix_spec)
     }
+}
+
+fn get_next_prefix(mut existing_prefix: Vec<u8>) -> Option<String> {
+    for n in (0..existing_prefix.len()).rev() {
+        match existing_prefix[n] {
+            b'\r' | b'\n' => continue,
+            b'f' => {
+                existing_prefix[n] = b'0';
+            }
+            b'9' => {
+                existing_prefix[n] = b'a';
+                break;
+            }
+            arg => {
+                existing_prefix[n] = arg + 1;
+                break;
+            }
+        }
+    }
+    Some(
+        std::str::from_utf8(&existing_prefix)
+            .unwrap()
+            .trim_end()
+            .to_string(),
+    )
 }
 
 fn run_lucky_commit<H: GitHashFn>(
     existing_commit: &[u8],
-    prefix_spec: Option<&str>,
+    prefix_spec: &Option<String>,
 ) -> Result<(), ParseHashPrefixErr> {
     let desired_prefix = prefix_spec
+        .as_ref()
+        .map(String::as_str)
         .map(str::parse::<HashPrefix<H>>)
         .transpose()?
         .unwrap_or_default();
@@ -79,7 +110,7 @@ fn run_lucky_commit<H: GitHashFn>(
     }
 }
 
-fn spawn_git(args: &[&str], stdin: Option<&[u8]>) -> Vec<u8> {
+fn spawn_git_silent(args: &[&str], stdin: Option<&[u8]>) -> Option<Vec<u8>> {
     let mut child = Command::new("git")
         .args(args)
         .stdin(if stdin.is_some() {
@@ -98,10 +129,17 @@ fn spawn_git(args: &[&str], stdin: Option<&[u8]>) -> Vec<u8> {
     let output = child.wait_with_output().unwrap();
 
     if !output.status.success() {
-        panic!("git finished with non-zero exit code: {:?}", args);
+        None
+    } else {
+        Some(output.stdout)
     }
+}
 
-    output.stdout
+fn spawn_git(args: &[&str], stdin: Option<&[u8]>) -> Vec<u8> {
+    match spawn_git_silent(args, stdin) {
+        Some(v) => v,
+        None => panic!("git finished with non-zero exit code: {:?}", args),
+    }
 }
 
 fn looks_like_sha256_repository(commit: &[u8]) -> bool {
