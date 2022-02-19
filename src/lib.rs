@@ -10,15 +10,14 @@ use std::{
     cmp::Ord,
     error::Error,
     fmt::{Debug, Display, Formatter},
-    iter::{once, repeat},
-    mem::{align_of, size_of},
+    iter, mem,
     ops::Range,
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
     },
-    thread::{spawn, JoinHandle},
+    thread::{self, JoinHandle},
 };
 
 #[cfg(feature = "opencl")]
@@ -309,7 +308,7 @@ impl<H: GitHashFn> HashSearchWorker<H> {
                 let result_sender = shared_sender.clone();
                 let worker_cancel_signal = Arc::clone(&lame_duck_cancel_signal);
 
-                spawn(move || {
+                thread::spawn(move || {
                     let _ = result_sender
                         .send(worker.search_with_cpu_single_threaded(worker_cancel_signal));
                 })
@@ -821,9 +820,9 @@ fn encode_into_opencl_vector<H: GitHashFn>(data: H::Block) -> Uint16 {
 // could technically end up being at different versions between the sha1 and sha2 crates, which would cause
 // compile errors if the sha1 version of `GenericArray` gets passed to sha2 methods.
 fn as_chunks_mut<H: GitHashFn>(slice: &mut [u8]) -> &mut [H::Block] {
-    assert_eq!(size_of::<H::Block>(), 64);
-    assert_eq!(align_of::<H::Block>(), align_of::<u8>());
-    assert_eq!(slice.len() % size_of::<H::Block>(), 0);
+    assert_eq!(mem::size_of::<H::Block>(), 64);
+    assert_eq!(mem::align_of::<H::Block>(), mem::align_of::<u8>());
+    assert_eq!(slice.len() % mem::size_of::<H::Block>(), 0);
     // SAFETY:
     // * All of the bytes in the slice are initialized, and the alignment of u8 and [u8; 64]
     //   are the same.
@@ -834,7 +833,7 @@ fn as_chunks_mut<H: GitHashFn>(slice: &mut [u8]) -> &mut [H::Block] {
     unsafe {
         std::slice::from_raw_parts_mut(
             slice.as_mut_ptr().cast(),
-            slice.len() / size_of::<H::Block>(),
+            slice.len() / mem::size_of::<H::Block>(),
         )
     }
 }
@@ -842,8 +841,8 @@ fn as_chunks_mut<H: GitHashFn>(slice: &mut [u8]) -> &mut [H::Block] {
 // Finalization padding that gets added to the end of data being hashed with sha1 or sha256
 // (the padding happens to be the same for both)
 fn sha_finalization_padding(data_length: usize) -> impl IntoIterator<Item = u8> {
-    once(0x80)
-        .chain(repeat(0).take((55 - data_length as isize).rem_euclid(64) as usize))
+    iter::once(0x80)
+        .chain(iter::repeat(0).take((55 - data_length as isize).rem_euclid(64) as usize))
         .chain(<[u8; 8]>::into_iter((data_length as u64 * 8).to_be_bytes()))
 }
 

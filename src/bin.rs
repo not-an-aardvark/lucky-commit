@@ -6,7 +6,7 @@ use lucky_commit::{
 use std::{
     env,
     io::Write,
-    process::{exit, Command, Stdio},
+    process::{self, Command, Stdio},
 };
 
 fn main() -> Result<(), ParseHashPrefixErr> {
@@ -14,13 +14,13 @@ fn main() -> Result<(), ParseHashPrefixErr> {
     let prefix_spec = match args.as_slice() {
         [_, arg] if arg == "--benchmark" => {
             benchmark::run_benchmark();
-            exit(0)
+            process::exit(0)
         }
         [_, prefix] => Some(prefix.as_str()),
         [_] => None,
         _ => {
             eprintln!("Usage: lucky_commit [commit-hash-prefix]");
-            exit(1)
+            process::exit(1)
         }
     };
 
@@ -75,7 +75,7 @@ fn run_lucky_commit<H: GitHashFn>(
             of trillions of possible commits. Hopefully you haven't just been sitting here \
             waiting the whole time."
         );
-        exit(1)
+        process::exit(1)
     }
 }
 
