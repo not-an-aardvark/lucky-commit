@@ -122,7 +122,7 @@ pub struct HashPrefix<H: GitHashFn> {
     /// Mask containing bits set to 1 if the bit at that position is specified
     /// in the prefix, and 0 otherwise.
     mask: H::State,
-    // For example, the hash prefix "deadbeef123" corresponds to the
+    // For example, the sha1 hash prefix "deadbeef123" corresponds to the
     // following structure:
     //   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
 }
