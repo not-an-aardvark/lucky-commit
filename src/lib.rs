@@ -234,8 +234,7 @@ mod private {
 
 impl<H: GitHashFn> HashSearchWorker<H> {
     /// Creates a worker for a specific commit and prefix, with an initial
-    /// workload of 1 ** 48 units. As a rough approximation depending on hardware,
-    /// each worker can perform about 7 million units of work per second.
+    /// workload of 1 ** 48 units.
     pub fn new(current_commit: &[u8], desired_prefix: HashPrefix<H>) -> Self {
         Self {
             processed_commit: ProcessedCommit::new(current_commit),
