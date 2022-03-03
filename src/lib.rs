@@ -773,7 +773,7 @@ impl<H: GitHashFn> GitCommit<H> {
                     as_chunks_mut::<H>(
                         commit_header
                             .into_iter()
-                            .chain(commit.to_owned().into_iter())
+                            .chain(commit.iter().cloned())
                             .chain(sha_finalization_padding(commit_data_length))
                             .collect::<Vec<_>>()
                             .as_mut(),
