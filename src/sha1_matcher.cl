@@ -1,4 +1,4 @@
-// Note: A lot of code is duplicated between this file and sha256_prefix_matcher.cl.
+// Note: A lot of code is duplicated between this file and sha256_matcher.cl.
 uint16 arrange_padding_block(ulong padding_specifier, uint4 padding_block_ending);
 void sha1_compress(__private uint* h, uint16 w);
 
@@ -10,8 +10,8 @@ __constant uint PADDING_CHUNKS[16] = {
 };
 
 __kernel void scatter_padding_and_find_match(
-    __global uint* desired_prefix_data,
-    __global uint* desired_prefix_mask,
+    __global uint* hash_spec_data,
+    __global uint* hash_spec_mask,
     __global uint* h,
     ulong base_padding_specifier,
     __global uint16* dynamic_blocks,
@@ -31,11 +31,11 @@ __kernel void scatter_padding_and_find_match(
     }
 
     if (
-        (finalized_hash[0] & desired_prefix_mask[0]) == desired_prefix_data[0] &&
-        (finalized_hash[1] & desired_prefix_mask[1]) == desired_prefix_data[1] &&
-        (finalized_hash[2] & desired_prefix_mask[2]) == desired_prefix_data[2] &&
-        (finalized_hash[3] & desired_prefix_mask[3]) == desired_prefix_data[3] &&
-        (finalized_hash[4] & desired_prefix_mask[4]) == desired_prefix_data[4]
+        (finalized_hash[0] & hash_spec_mask[0]) == hash_spec_data[0] &&
+        (finalized_hash[1] & hash_spec_mask[1]) == hash_spec_data[1] &&
+        (finalized_hash[2] & hash_spec_mask[2]) == hash_spec_data[2] &&
+        (finalized_hash[3] & hash_spec_mask[3]) == hash_spec_data[3] &&
+        (finalized_hash[4] & hash_spec_mask[4]) == hash_spec_data[4]
     ) {
         atomic_cmpxchg(successful_match_receiver, UINT_MAX, get_global_id(0));
     }

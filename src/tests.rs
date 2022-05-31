@@ -189,6 +189,32 @@ fn search_success_sha256_without_gpg_signature() {
 }
 
 #[test]
+fn search_success_with_placeholders_in_spec() {
+    assert_eq!(
+        HashSearchWorker::<Sha1>::new(
+            format!(
+                test_commit_without_signature!(),
+                static_padding = "",
+                dynamic_padding = ""
+            )
+            .as_bytes(),
+            "8f1e428__2".parse().unwrap(),
+        )
+        .with_capped_search_space(100)
+        .search(),
+        Some(GitCommit {
+            object: format!(
+                test_commit_without_signature!(),
+                static_padding = repeat(" ").take(61).collect::<String>(),
+                dynamic_padding = "  \t                                             "
+            )
+            .into_bytes(),
+            hash: [0x8f1e428e, 0xc25b1ea8, 0x8389165e, 0xeb3fbdff, 0xbf7c3267]
+        })
+    );
+}
+
+#[test]
 fn search_success_after_many_iterations() {
     assert_eq!(
         HashSearchWorker::<Sha1>::new(
@@ -227,7 +253,7 @@ fn search_success_with_large_padding_specifier() {
                 )
                 .as_bytes()
             ),
-            desired_prefix: "00".parse().unwrap(),
+            hash_spec: "00".parse().unwrap(),
             search_space: (1 << 40)..((1 << 40) + 256)
         }
         .search(),
@@ -244,7 +270,7 @@ fn search_success_with_large_padding_specifier() {
 }
 
 #[test]
-fn search_success_with_full_prefix_and_no_capped_space() {
+fn search_success_with_full_spec_and_no_capped_space() {
     // If this test keeps running and never finishes, it might indicate a bug in the lame-duck thread
     // signalling (where a single thread finds a match, but the other threads don't realize that they
     // were supposed to stop searching)
@@ -344,7 +370,7 @@ fn search_success_without_gpg_signature_gpu_cpu_parity_sha256() {
 }
 
 #[test]
-fn search_success_with_multi_word_prefix() {
+fn search_success_with_multi_word_spec() {
     assert_eq!(
         HashSearchWorker::<Sha1>::new(
             format!(
@@ -370,7 +396,7 @@ fn search_success_with_multi_word_prefix() {
 }
 
 #[test]
-fn search_success_with_multi_word_prefix_sha256() {
+fn search_success_with_multi_word_spec_sha256() {
     assert_eq!(
         HashSearchWorker::<Sha256>::new(
             format!(
@@ -400,7 +426,7 @@ fn search_success_with_multi_word_prefix_sha256() {
 
 #[cfg(feature = "opencl")]
 #[test]
-fn search_success_with_multi_word_prefix_gpu_cpu_parity() {
+fn search_success_with_multi_word_spec_gpu_cpu_parity() {
     assert!(
         HashSearchWorker::<Sha1>::gpus_available(),
         "\
@@ -436,7 +462,7 @@ fn search_success_with_multi_word_prefix_gpu_cpu_parity() {
 
 #[cfg(feature = "opencl")]
 #[test]
-fn search_success_with_multi_word_prefix_gpu_cpu_parity_sha256() {
+fn search_success_with_multi_word_spec_gpu_cpu_parity_sha256() {
     assert!(
         HashSearchWorker::<Sha1>::gpus_available(),
         "\
@@ -508,7 +534,7 @@ fn split_search_space_uneven() {
                 )
                 .as_bytes()
             ),
-            desired_prefix: Default::default(),
+            hash_spec: Default::default(),
             search_space: 0..100,
         }
         .split_search_space(3)
@@ -523,7 +549,7 @@ fn split_search_space_uneven() {
                     )
                     .as_bytes()
                 ),
-                desired_prefix: Default::default(),
+                hash_spec: Default::default(),
                 search_space: 0..33,
             },
             HashSearchWorker {
@@ -535,7 +561,7 @@ fn split_search_space_uneven() {
                     )
                     .as_bytes()
                 ),
-                desired_prefix: Default::default(),
+                hash_spec: Default::default(),
                 search_space: 33..66,
             },
             HashSearchWorker {
@@ -547,7 +573,7 @@ fn split_search_space_uneven() {
                     )
                     .as_bytes()
                 ),
-                desired_prefix: Default::default(),
+                hash_spec: Default::default(),
                 search_space: 66..100,
             }
         ]
@@ -737,58 +763,58 @@ fn compute_static_padding_length_solution_overlaps_digit_count_boundary() {
 }
 
 #[test]
-fn matches_desired_prefix_single_half() {
+fn hash_spec_matches_single_half() {
     assert!("1"
-        .parse::<HashPrefix<Sha1>>()
+        .parse::<HashSpec<Sha1>>()
         .unwrap()
         .matches(&[0x1e1e1e1e; 5]))
 }
 
 #[test]
-fn matches_desired_prefix_single_half_mismatch() {
+fn hash_spec_matches_single_half_mismatch() {
     assert!(!"1"
-        .parse::<HashPrefix<Sha1>>()
+        .parse::<HashSpec<Sha1>>()
         .unwrap()
         .matches(&[0x21212121; 5]))
 }
 
 #[test]
-fn matches_desired_prefix_data_without_half() {
+fn hash_spec_matches_data_without_half() {
     assert!("010203"
-        .parse::<HashPrefix<Sha1>>()
+        .parse::<HashSpec<Sha1>>()
         .unwrap()
         .matches(&[0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e0f10, 0x11121314]))
 }
 
 #[test]
-fn matches_desired_prefix_matching_data_and_half() {
+fn hash_spec_matches_matching_data_and_half() {
     assert!("0102034"
-        .parse::<HashPrefix<Sha1>>()
+        .parse::<HashSpec<Sha1>>()
         .unwrap()
         .matches(&[0x0102034f, 0x05060708, 0x090a0b0c, 0x0d0e0f10, 0x11121314]))
 }
 
 #[test]
-fn matches_desired_prefix_matching_data_mismatching_half() {
+fn hash_spec_matches_matching_data_mismatching_half() {
     assert!(!"0102035"
-        .parse::<HashPrefix<Sha1>>()
+        .parse::<HashSpec<Sha1>>()
         .unwrap()
         .matches(&[0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e0f10, 0x11121314]))
 }
 
 #[test]
-fn matches_desired_prefix_mismatching_data_matching_half() {
+fn hash_spec_matches_mismatching_data_matching_half() {
     assert!(!"0105034"
-        .parse::<HashPrefix<Sha1>>()
+        .parse::<HashSpec<Sha1>>()
         .unwrap()
         .matches(&[0x0102034f, 0x05060708, 0x090a0b0c, 0x0d0e0f10, 0x11121314]))
 }
 
 #[test]
-fn hash_prefix_three_and_a_half_bytes() {
+fn parse_hash_spec_three_and_a_half_bytes() {
     assert_eq!(
         "8f1e428".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             mask: [0xff_ff_ff_f0, 0, 0, 0, 0],
             data: [0x8f_1e_42_80, 0, 0, 0, 0],
         })
@@ -796,10 +822,10 @@ fn hash_prefix_three_and_a_half_bytes() {
 }
 
 #[test]
-fn hash_prefix_two_bytes() {
+fn parse_hash_spec_two_bytes() {
     assert_eq!(
         "8f1e".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             mask: [0xff_ff_00_00, 0, 0, 0, 0],
             data: [0x8f_1e_00_00, 0, 0, 0, 0],
         })
@@ -807,10 +833,10 @@ fn hash_prefix_two_bytes() {
 }
 
 #[test]
-fn hash_prefix_four_bytes() {
+fn parse_hash_spec_four_bytes() {
     assert_eq!(
         "8f1e428e".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             mask: [0xff_ff_ff_ff, 0, 0, 0, 0],
             data: [0x8f_1e_42_8e, 0, 0, 0, 0],
         })
@@ -818,10 +844,10 @@ fn hash_prefix_four_bytes() {
 }
 
 #[test]
-fn hash_prefix_only_half_byte() {
+fn parse_hash_spec_only_half_byte() {
     assert_eq!(
         "8".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             mask: [0xf0_00_00_00, 0, 0, 0, 0],
             data: [0x80_00_00_00, 0, 0, 0, 0],
         })
@@ -829,10 +855,10 @@ fn hash_prefix_only_half_byte() {
 }
 
 #[test]
-fn hash_prefix_multi_word_inexact() {
+fn parse_hash_spec_multi_word_inexact() {
     assert_eq!(
         "abcdef001234".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             data: [0xab_cd_ef_00, 0x12_34_00_00, 0, 0, 0],
             mask: [0xff_ff_ff_ff, 0xff_ff_00_00, 0, 0, 0],
         })
@@ -840,10 +866,10 @@ fn hash_prefix_multi_word_inexact() {
 }
 
 #[test]
-fn hash_prefix_multi_word_inexact_sha256() {
+fn parse_hash_spec_multi_word_inexact_sha256() {
     assert_eq!(
         "abcdef001234".parse(),
-        Ok(HashPrefix::<Sha256> {
+        Ok(HashSpec::<Sha256> {
             data: [0xab_cd_ef_00, 0x12_34_00_00, 0, 0, 0, 0, 0, 0],
             mask: [0xff_ff_ff_ff, 0xff_ff_00_00, 0, 0, 0, 0, 0, 0],
         })
@@ -851,10 +877,10 @@ fn hash_prefix_multi_word_inexact_sha256() {
 }
 
 #[test]
-fn hash_prefix_multi_word_exact() {
+fn parse_hash_spec_multi_word_exact() {
     assert_eq!(
         "abcdef0012345678".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             data: [0xab_cd_ef_00, 0x12_34_56_78, 0, 0, 0],
             mask: [0xff_ff_ff_ff, 0xff_ff_ff_ff, 0, 0, 0],
         })
@@ -862,10 +888,10 @@ fn hash_prefix_multi_word_exact() {
 }
 
 #[test]
-fn hash_prefix_empty() {
+fn parse_hash_spec_empty() {
     assert_eq!(
         "".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             data: [0; 5],
             mask: [0; 5],
         })
@@ -873,10 +899,10 @@ fn hash_prefix_empty() {
 }
 
 #[test]
-fn hash_prefix_odd_chars() {
+fn parse_hash_spec_odd_chars() {
     assert_eq!(
         "abcdef5".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             data: [0xab_cd_ef_50, 0, 0, 0, 0],
             mask: [0xff_ff_ff_f0, 0, 0, 0, 0],
         })
@@ -884,10 +910,10 @@ fn hash_prefix_odd_chars() {
 }
 
 #[test]
-fn hash_prefix_capital_letters() {
+fn parse_hash_spec_capital_letters() {
     assert_eq!(
         "ABCDEFB".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             data: [0xab_cd_ef_b0, 0, 0, 0, 0],
             mask: [0xff_ff_ff_f0, 0, 0, 0, 0],
         })
@@ -895,26 +921,26 @@ fn hash_prefix_capital_letters() {
 }
 
 #[test]
-fn hash_prefix_invalid_even_chars() {
+fn parse_hash_spec_invalid_even_chars() {
     assert_eq!(
-        "abcdgeb".parse::<HashPrefix<Sha1>>(),
-        Err(ParseHashPrefixErr::OnlyHexCharactersAllowed)
+        "abcdgeb".parse::<HashSpec<Sha1>>(),
+        Err(ParseHashSpecErr::InvalidCharacter('g'))
     )
 }
 
 #[test]
-fn hash_prefix_invalid_odd_char() {
+fn parse_hash_spec_invalid_odd_char() {
     assert_eq!(
-        "abcdefg".parse::<HashPrefix<Sha1>>(),
-        Err(ParseHashPrefixErr::OnlyHexCharactersAllowed)
+        "abcdefg".parse::<HashSpec<Sha1>>(),
+        Err(ParseHashSpecErr::InvalidCharacter('g'))
     )
 }
 
 #[test]
-fn hash_prefix_exact_length_match() {
+fn parse_hash_spec_exact_length_match() {
     assert_eq!(
         "1234567812345678123456781234567812345678".parse(),
-        Ok(HashPrefix::<Sha1> {
+        Ok(HashSpec::<Sha1> {
             data: [
                 0x12_34_56_78,
                 0x12_34_56_78,
@@ -928,18 +954,18 @@ fn hash_prefix_exact_length_match() {
 }
 
 #[test]
-fn hash_prefix_too_long_with_half_byte() {
+fn parse_hash_spec_too_long_with_half_byte() {
     assert_eq!(
-        "12345678123456781234567812345678123456781".parse::<HashPrefix<Sha1>>(),
-        Err(ParseHashPrefixErr::TooLong)
+        "12345678123456781234567812345678123456781".parse::<HashSpec<Sha1>>(),
+        Err(ParseHashSpecErr::TooLong)
     )
 }
 
 #[test]
-fn hash_prefix_too_long_for_sha1_but_ok_for_sha256() {
+fn parse_hash_spec_too_long_for_sha1_but_ok_for_sha256() {
     assert_eq!(
         "12345678123456781234567812345678123456781".parse(),
-        Ok(HashPrefix::<Sha256> {
+        Ok(HashSpec::<Sha256> {
             data: [
                 0x12_34_56_78,
                 0x12_34_56_78,
@@ -965,18 +991,73 @@ fn hash_prefix_too_long_for_sha1_but_ok_for_sha256() {
 }
 
 #[test]
-fn hash_prefix_too_long_with_half_byte_sha256() {
+fn parse_hash_spec_too_long_with_half_byte_sha256() {
     assert_eq!(
         "12345678123456781234567812345678123456781234567812345678123456781"
-            .parse::<HashPrefix<Sha256>>(),
-        Err(ParseHashPrefixErr::TooLong)
+            .parse::<HashSpec<Sha256>>(),
+        Err(ParseHashSpecErr::TooLong)
     )
 }
 
 #[test]
-fn hash_prefix_too_many_full_bytes() {
+fn parse_hash_spec_too_many_full_bytes() {
     assert_eq!(
-        "123456781234567812345678123456781234567812".parse::<HashPrefix<Sha1>>(),
-        Err(ParseHashPrefixErr::TooLong)
+        "123456781234567812345678123456781234567812".parse::<HashSpec<Sha1>>(),
+        Err(ParseHashSpecErr::TooLong)
+    )
+}
+
+#[test]
+fn parse_hash_spec_trailing_underscore_in_word_sha1() {
+    assert_eq!(
+        "1234567_1234567_".parse(),
+        Ok(HashSpec::<Sha1> {
+            data: [0x12345670, 0x12345670, 0, 0, 0],
+            mask: [0xfffffff0, 0xfffffff0, 0, 0, 0],
+        })
+    )
+}
+
+#[test]
+fn parse_hash_spec_trailing_underscore_in_word_sha256() {
+    assert_eq!(
+        "1234567_1234567_".parse(),
+        Ok(HashSpec::<Sha256> {
+            data: [0x12345670, 0x12345670, 0, 0, 0, 0, 0, 0],
+            mask: [0xfffffff0, 0xfffffff0, 0, 0, 0, 0, 0, 0],
+        })
+    )
+}
+
+#[test]
+fn parse_hash_spec_leading_underscore_in_word() {
+    assert_eq!(
+        "_1234567_1234567".parse(),
+        Ok(HashSpec::<Sha1> {
+            data: [0x01234567, 0x01234567, 0, 0, 0],
+            mask: [0x0fffffff, 0x0fffffff, 0, 0, 0],
+        })
+    )
+}
+
+#[test]
+fn parse_hash_spec_mixed_underscores_in_word() {
+    assert_eq!(
+        "1_2_3_4_5_6_7_8_9_a_b_c_d_e_f_0_f00d".parse(),
+        Ok(HashSpec::<Sha1> {
+            data: [0x10203040, 0x50607080, 0x90a0b0c0, 0xd0e0f000, 0xf00d0000],
+            mask: [0xf0f0f0f0, 0xf0f0f0f0, 0xf0f0f0f0, 0xf0f0f0f0, 0xffff0000],
+        })
+    )
+}
+
+#[test]
+fn parse_hash_spec_all_underscores() {
+    assert_eq!(
+        "__".parse(),
+        Ok(HashSpec::<Sha256> {
+            data: [0; 8],
+            mask: [0; 8],
+        })
     )
 }

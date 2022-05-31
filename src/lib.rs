@@ -31,11 +31,11 @@ use ocl::{
 use std::convert::TryInto;
 
 /// A worker that, when invoked, will look in a predetermined search space to find a modification
-/// to a specific commit that matches a specific hash prefix.
+/// to a specific commit that matches a specific hash spec.
 #[derive(Debug, PartialEq)]
 pub struct HashSearchWorker<H: GitHashFn> {
     processed_commit: ProcessedCommit,
-    desired_prefix: HashPrefix<H>,
+    hash_spec: HashSpec<H>,
     search_space: Range<u64>,
 }
 
@@ -113,28 +113,28 @@ struct PartiallyHashedCommit<'a, H: GitHashFn> {
     dynamic_blocks: &'a mut [H::Block],
 }
 
-/// Defines a desired target prefix for a commit hash.
+/// Defines a spec for a desired commit hash.
 #[derive(Debug, PartialEq, Clone)]
-pub struct HashPrefix<H: GitHashFn> {
-    /// The prefix, as split into big-endian four-byte chunks.
-    /// All bits beyond the length of the prefix are set to 0.
+pub struct HashSpec<H: GitHashFn> {
+    /// The data in the desired hash, as split into big-endian four-byte chunks.
+    /// All bits that are unspecified (e.g. bits corresponding to the end of the hash, when only a prefix is being matched)
+    /// are set to zero.
     data: H::State,
-    /// Mask containing bits set to 1 if the bit at that position is specified
-    /// in the prefix, and 0 otherwise.
+    /// Mask containing bits set to 1 if the bit at that position is specified, and 0 otherwise.
     mask: H::State,
     // For example, the sha1 hash prefix "deadbeef123" corresponds to the
-    // following structure:
-    //   HashPrefix { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
+    // following spec:
+    //   HashSpec { data: [0xdeadbeef, 0x12300000, 0, 0, 0], mask: [0xffffffff, 0xfff00000, 0, 0, 0] }
 }
 
-/// An error that results from parsing an invalid HashPrefix
+/// An error that results from parsing an invalid HashSpec
 #[non_exhaustive]
 #[derive(PartialEq, Eq)]
-pub enum ParseHashPrefixErr {
-    /// The prefix is longer than a hash with the specified algorithm
+pub enum ParseHashSpecErr {
+    /// The input string is longer than a hash with the specified algorithm
     TooLong,
-    /// The prefix contains characters which are not valid hex characters
-    OnlyHexCharactersAllowed,
+    /// The input string contains characters which are neither hex characters nor '_'.
+    InvalidCharacter(char),
 }
 
 /// A git commit
@@ -170,12 +170,12 @@ pub trait GitHashFn: private::Sealed + Debug + Send + Clone + Eq + 'static {
     fn compress(state: &mut Self::State, blocks: &[Self::Block]);
 
     #[cfg(feature = "opencl")]
-    /// Source code of an OpenCL shader kernel finding prefix matches for the given
+    /// Source code of an OpenCL shader kernel finding hash matches for the given
     /// algorithm. The kernel should have a function `scatter_padding_and_find_match`, which
     /// accepts the following parameters:
-    /// 1. A pointer to the `data` in the desired hash prefix (pointing to the appropriate
+    /// 1. A pointer to the `data` in the desired hash spec (pointing to the appropriate
     ///    number of bytes for the given hash algorithm)
-    /// 1. A pointer to the `mask` of the desired hash prefix
+    /// 1. A pointer to the `mask` of the desired hash spec
     /// 1. The "base padding specifier" for the current run, which determines which padding will
     ///    be attempted. The padding specifier used by any given thread is equal to the base
     ///    specifier plus that thread's ID.
@@ -202,7 +202,7 @@ impl GitHashFn for Sha1 {
     }
 
     #[cfg(feature = "opencl")]
-    const KERNEL: &'static str = include_str!("sha1_prefix_matcher.cl");
+    const KERNEL: &'static str = include_str!("sha1_matcher.cl");
 }
 
 /// The hash type used for Sha256 git repositories.
@@ -223,7 +223,7 @@ impl GitHashFn for Sha256 {
     }
 
     #[cfg(feature = "opencl")]
-    const KERNEL: &'static str = include_str!("sha256_prefix_matcher.cl");
+    const KERNEL: &'static str = include_str!("sha256_matcher.cl");
 }
 
 mod private {
@@ -233,12 +233,12 @@ mod private {
 }
 
 impl<H: GitHashFn> HashSearchWorker<H> {
-    /// Creates a worker for a specific commit and prefix, with an initial
-    /// workload of 1 ** 48 units.
-    pub fn new(current_commit: &[u8], desired_prefix: HashPrefix<H>) -> Self {
+    /// Creates a worker for a specific commit and hash spec, with an initial
+    /// search space of 2**48.
+    pub fn new(current_commit: &[u8], hash_spec: HashSpec<H>) -> Self {
         Self {
             processed_commit: ProcessedCommit::new(current_commit),
-            desired_prefix,
+            hash_spec,
             search_space: 0..(1 << 48),
         }
     }
@@ -251,7 +251,7 @@ impl<H: GitHashFn> HashSearchWorker<H> {
     }
 
     /// Splits this worker into `divisor` new workers for the same commit and
-    /// desired prefix, with the search space split roughly equally.
+    /// desired hash, with the search space split roughly equally.
     /// A worker's search space is an approximation to help with effecient threading. There is
     /// no guarantee that the resulting workers have perfectly disjoint search spaces, so in theory
     /// multiple workers could both find the same hash match despite having "split" the space.
@@ -269,7 +269,7 @@ impl<H: GitHashFn> HashSearchWorker<H> {
             };
             Self {
                 processed_commit: self.processed_commit.clone(),
-                desired_prefix: self.desired_prefix.clone(),
+                hash_spec: self.hash_spec.clone(),
                 search_space: range_start..range_end,
             }
         })
@@ -343,7 +343,7 @@ impl<H: GitHashFn> HashSearchWorker<H> {
     ) -> Option<GitCommit<H>> {
         let HashSearchWorker {
             search_space,
-            desired_prefix,
+            hash_spec,
             mut processed_commit,
             ..
         } = self;
@@ -353,7 +353,7 @@ impl<H: GitHashFn> HashSearchWorker<H> {
         for base_padding_specifier in search_space.step_by(lame_duck_check_interval as usize) {
             for index_in_interval in 0..lame_duck_check_interval {
                 partially_hashed_commit.scatter_padding(base_padding_specifier + index_in_interval);
-                if desired_prefix.matches(&partially_hashed_commit.current_hash()) {
+                if hash_spec.matches(&partially_hashed_commit.current_hash()) {
                     return Some(GitCommit::new(processed_commit.commit()));
                 }
             }
@@ -370,14 +370,14 @@ impl<H: GitHashFn> HashSearchWorker<H> {
     fn search_with_gpu(self) -> ocl::Result<Option<GitCommit<H>>> {
         let HashSearchWorker {
             search_space,
-            desired_prefix,
+            hash_spec,
             mut processed_commit,
             ..
         } = self;
         let mut partially_hashed_commit = processed_commit.as_partially_hashed_commit::<H>();
 
         let num_threads = *[
-            desired_prefix.estimated_hashes_needed().saturating_mul(4),
+            hash_spec.estimated_attempts_needed().saturating_mul(4),
             search_space.end - search_space.start,
             1 << 22,
         ]
@@ -411,17 +411,17 @@ impl<H: GitHashFn> HashSearchWorker<H> {
             .arg(
                 &Buffer::builder()
                     .queue(queue.clone())
-                    .len(desired_prefix.data.as_ref().len())
+                    .len(hash_spec.data.as_ref().len())
                     .flags(MemFlags::READ_ONLY)
-                    .copy_host_slice(desired_prefix.data.as_ref())
+                    .copy_host_slice(hash_spec.data.as_ref())
                     .build()?,
             )
             .arg(
                 &Buffer::builder()
                     .queue(queue.clone())
-                    .len(desired_prefix.mask.as_ref().len())
+                    .len(hash_spec.mask.as_ref().len())
                     .flags(MemFlags::READ_ONLY)
-                    .copy_host_slice(desired_prefix.mask.as_ref())
+                    .copy_host_slice(hash_spec.mask.as_ref())
                     .build()?,
             )
             .arg(
@@ -471,16 +471,16 @@ impl<H: GitHashFn> HashSearchWorker<H> {
                 partially_hashed_commit.scatter_padding(successful_padding_specifier);
 
                 assert!(
-                    desired_prefix.matches(&partially_hashed_commit.current_hash()),
+                    hash_spec.matches(&partially_hashed_commit.current_hash()),
                     "\
                         A GPU search reported a commit with a successful match, but when that \
-                        commit was hashed in postprocessing, it didn't match the desired prefix. \
+                        commit was hashed in postprocessing, it didn't match the desired spec. \
                         This is a bug. The most likely explanation is that the two implementations of \
                         `scatter_padding` in Rust and OpenCL (or the implementations of SHA1/SHA256) have diverged \
-                        from each other.\n\npartial commit:\n\t{:?}\ndesired prefix:\n\t{:?}\ncommit hash \
+                        from each other.\n\npartial commit:\n\t{:?}\ndesired hash spec:\n\t{:?}\ncommit hash \
                         produced during postprocessing:{:?}\n\tpadding specifier: {}",
                     partially_hashed_commit,
-                    desired_prefix,
+                    hash_spec,
                     partially_hashed_commit.current_hash(),
                     successful_padding_specifier,
                 );
@@ -661,6 +661,22 @@ impl<'a, H: GitHashFn> PartiallyHashedCommit<'a, H> {
     // This should be kept in sync with the OpenCL `arrange_padding_block` implementation.
     #[inline(always)]
     fn scatter_padding(&mut self, padding_specifier: u64) {
+        // The 256 unique strings of length 8 which contain only ' ' and '\t'.
+        // These are computed at compile-time to allow them to be copied quickly.
+        static PADDING_CHUNKS: [[u8; 8]; 256] = {
+            let mut padding_chunks = [[0; 8]; 256];
+            let mut i = 0;
+            while i < 256 {
+                let mut j = 0;
+                while j < 8 {
+                    padding_chunks[i][j] = if i & (0x80 >> j) == 0 { b' ' } else { b'\t' };
+                    j += 1;
+                }
+                i += 1;
+            }
+            padding_chunks
+        };
+
         for (padding_chunk, &padding_specifier_byte) in self
             .dynamic_padding_mut()
             .chunks_exact_mut(8)
@@ -682,7 +698,7 @@ impl<'a, H: GitHashFn> PartiallyHashedCommit<'a, H> {
     }
 }
 
-impl<H: GitHashFn> HashPrefix<H> {
+impl<H: GitHashFn> HashSpec<H> {
     #[inline(always)]
     fn matches(&self, hash: &H::State) -> bool {
         hash.as_ref()
@@ -690,11 +706,11 @@ impl<H: GitHashFn> HashPrefix<H> {
             .zip(self.mask.as_ref().iter())
             .map(|(&hash_word, &mask_word)| hash_word & mask_word)
             .zip(self.data.as_ref().iter())
-            .all(|(masked_hash_word, &desired_prefix_word)| masked_hash_word == desired_prefix_word)
+            .all(|(masked_hash_word, &hash_spec_word)| masked_hash_word == hash_spec_word)
     }
 
     #[cfg(feature = "opencl")]
-    fn estimated_hashes_needed(&self) -> u64 {
+    fn estimated_attempts_needed(&self) -> u64 {
         2u64.saturating_pow(
             self.mask
                 .as_ref()
@@ -705,53 +721,71 @@ impl<H: GitHashFn> HashPrefix<H> {
     }
 }
 
-impl<H: GitHashFn> FromStr for HashPrefix<H> {
-    type Err = ParseHashPrefixErr;
-    fn from_str(prefix: &str) -> Result<Self, Self::Err> {
-        let num_words = H::INITIAL_STATE.as_ref().len();
-        if prefix.len() > num_words * 8 {
-            return Err(ParseHashPrefixErr::TooLong);
+impl<H: GitHashFn> FromStr for HashSpec<H> {
+    type Err = ParseHashSpecErr;
+    /// Parses a HashSpec from a string. The string must only contain hex characters (0-9, a-f, A-F), indicating the hex
+    /// value that the hash should have at a given position, or '_', indicating that the hash can have any value at the given
+    /// position. All positions in the hash beyond the length of the string are treated as unspecified (equivalent to if the
+    /// string was right-padded with '_').
+    fn from_str(prefix_string: &str) -> Result<Self, Self::Err> {
+        let max_hex_character_length = mem::size_of::<H::State>() * 2;
+        if prefix_string.chars().count() > max_hex_character_length {
+            return Err(ParseHashSpecErr::TooLong);
         }
 
-        let contains_only_valid_characters = prefix.chars().all(|c| {
-            ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
-        });
-
-        if !contains_only_valid_characters {
-            return Err(ParseHashPrefixErr::OnlyHexCharactersAllowed);
+        let mut parsed_hash_spec = HashSpec::<H> {
+            // Zero-initialize the data and mask
+            data: H::State::default(),
+            mask: H::State::default(),
+        };
+        for ((hash_spec_chunk, data_word), mask_word) in prefix_string
+            .chars()
+            // Pad the input string out to the length of a hash
+            .chain(iter::repeat('_'))
+            .take(max_hex_character_length)
+            // Split it into 8-hex-character chunks
+            .collect::<Vec<_>>()
+            .chunks(8)
+            // Associate each 8-hex-character chunk with corresponding 32-bit word of the hash spec
+            .zip(parsed_hash_spec.data.as_mut())
+            .zip(parsed_hash_spec.mask.as_mut())
+        {
+            for (&hash_spec_character, slot_bit_offset) in
+                hash_spec_chunk.iter().zip((0..32).step_by(4).rev())
+            {
+                // Parse each hex character of the input string and write it to the appropriate slots of the hash spec.
+                if let Some(hex_character_value) = hash_spec_character.to_digit(16) {
+                    *data_word |= hex_character_value << slot_bit_offset;
+                    *mask_word |= 0xf << slot_bit_offset;
+                } else if hash_spec_character != '_' {
+                    // The '_' character in a hash spec is allowed as an "any value is allowed here" placeholder
+                    // (corresponds to a 0 in both the data slot and the mask slot). All other non-hex characters are
+                    // disallowed.
+                    return Err(ParseHashSpecErr::InvalidCharacter(hash_spec_character));
+                }
+            }
         }
 
-        let mut data = H::State::default();
-        let mut mask = H::State::default();
-
-        for (i, chunk) in prefix.as_bytes().chunks(8).enumerate() {
-            let value =
-                u32::from_str_radix(&String::from_utf8(chunk.to_vec()).unwrap(), 16).unwrap();
-            let num_unspecified_bits = 32 - 4 * chunk.len();
-            data.as_mut()[i] = value << num_unspecified_bits;
-            mask.as_mut()[i] = u32::MAX >> num_unspecified_bits << num_unspecified_bits;
-        }
-
-        Ok(HashPrefix { data, mask })
+        Ok(parsed_hash_spec)
     }
 }
 
-impl<H: GitHashFn> Default for HashPrefix<H> {
+impl<H: GitHashFn> Default for HashSpec<H> {
     fn default() -> Self {
         "0000000".parse().unwrap()
     }
 }
 
-impl Error for ParseHashPrefixErr {}
-impl Display for ParseHashPrefixErr {
+impl Error for ParseHashSpecErr {}
+impl Display for ParseHashSpecErr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match *self {
-            Self::TooLong => write!(f, "hash prefix can't be longer than an actual hash"),
-            Self::OnlyHexCharactersAllowed => write!(f, "hash prefix contains invalid characters"),
+            Self::TooLong => write!(f, "hash spec can't be longer than an actual hash"),
+            Self::InvalidCharacter(c) => write!(f, "hash spec contains invalid character '{c}' (only hex characters and underscores are allowed)"),
         }
     }
 }
-impl Debug for ParseHashPrefixErr {
+impl Debug for ParseHashSpecErr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         <Self as Display>::fmt(self, f)
     }
@@ -844,22 +878,6 @@ fn sha_finalization_padding(data_length: usize) -> impl IntoIterator<Item = u8> 
         .chain(iter::repeat(0).take((55 - data_length as isize).rem_euclid(64) as usize))
         .chain(<[u8; 8]>::into_iter((data_length as u64 * 8).to_be_bytes()))
 }
-
-// The 256 unique strings of length 8 which contain only ' ' and '\t'.
-// These are computed statically in advance to allow them to be copied quickly.
-static PADDING_CHUNKS: [[u8; 8]; 256] = {
-    let mut padding_chunks = [[0; 8]; 256];
-    let mut i = 0;
-    while i < 256 {
-        let mut j = 0;
-        while j < 8 {
-            padding_chunks[i][j] = if i & (0x80 >> j) == 0 { b' ' } else { b'\t' };
-            j += 1;
-        }
-        i += 1;
-    }
-    padding_chunks
-};
 
 #[cfg(test)]
 mod tests;

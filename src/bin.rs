@@ -1,7 +1,7 @@
 mod benchmark;
 
 use lucky_commit::{
-    GitCommit, GitHashFn, HashPrefix, HashSearchWorker, ParseHashPrefixErr, Sha1, Sha256,
+    GitCommit, GitHashFn, HashSearchWorker, HashSpec, ParseHashSpecErr, Sha1, Sha256,
 };
 use std::{
     env,
@@ -9,9 +9,9 @@ use std::{
     process::{self, Command, Stdio},
 };
 
-fn main() -> Result<(), ParseHashPrefixErr> {
+fn main() -> Result<(), ParseHashSpecErr> {
     let args = env::args().collect::<Vec<String>>();
-    let prefix_spec = match args.as_slice() {
+    let maybe_prefix = match args.as_slice() {
         [_, arg] if arg == "--benchmark" => {
             benchmark::run_benchmark();
             process::exit(0)
@@ -19,29 +19,34 @@ fn main() -> Result<(), ParseHashPrefixErr> {
         [_, prefix] => Some(prefix.as_str()),
         [_] => None,
         _ => {
-            eprintln!("Usage: lucky_commit [commit-hash-prefix]");
+            eprintln!("\
+                Usage: lucky_commit [commit-hash-prefix]\n\
+                \n\
+                `commit-hash-prefix` must contain hex characters and underscores. An underscore indicates \
+                that the hash may have any value in the given position.
+            ");
             process::exit(1)
         }
     };
 
     let existing_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
     if looks_like_sha256_repository(&existing_commit) {
-        run_lucky_commit::<Sha256>(&existing_commit, prefix_spec)
+        run_lucky_commit::<Sha256>(&existing_commit, maybe_prefix)
     } else {
-        run_lucky_commit::<Sha1>(&existing_commit, prefix_spec)
+        run_lucky_commit::<Sha1>(&existing_commit, maybe_prefix)
     }
 }
 
 fn run_lucky_commit<H: GitHashFn>(
     existing_commit: &[u8],
-    prefix_spec: Option<&str>,
-) -> Result<(), ParseHashPrefixErr> {
-    let desired_prefix = prefix_spec
-        .map(str::parse::<HashPrefix<H>>)
+    maybe_prefix: Option<&str>,
+) -> Result<(), ParseHashSpecErr> {
+    let hash_spec: HashSpec<H> = maybe_prefix
+        .map(str::parse)
         .transpose()?
         .unwrap_or_default();
 
-    if let Some(found_commit) = HashSearchWorker::new(existing_commit, desired_prefix).search() {
+    if let Some(found_commit) = HashSearchWorker::new(existing_commit, hash_spec).search() {
         let new_hash = found_commit.hex_hash();
         let new_git_oid = spawn_git(
             &["hash-object", "-t", "commit", "-w", "--stdin"],

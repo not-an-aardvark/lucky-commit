@@ -18,13 +18,17 @@ As a demonstration, see the latest commit in this repository.
 
 ## How?
 
-`lucky-commit` amends your commit messages by adding a few characters of various types of whitespace, and keeps trying new messages until it finds a good hash. By default, it will keep searching until it finds a hash starting with "0000000", but this can be changed by simply passing the desired hash as an argument.
+`lucky-commit` amends your commit messages by adding a few characters of various types of whitespace, and keeps trying new messages until it finds a good hash. By default, it will look for a commit hash starting with "0000000".
+
+To find a hash starting with something other than "0000000", pass the desired prefix as a command-line argument:
 
 ```bash
 $ lucky_commit 1010101
 $ git log
 1010101 Some commit
 ```
+
+The command-line argument can also contain `_` placeholders (e.g. `lucky_commit 00_111`), indicating that the hash is allowed to have any hex character in the given slot.
 
 ## Why?
 
