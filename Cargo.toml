@@ -1,6 +1,6 @@
 [package]
 name = "lucky_commit"
-version = "2.1.1"
+version = "2.2.0"
 authors = ["Teddy Katz <teddy.katz@gmail.com>"]
 edition = "2018"
 description = "Make your git commits lucky!"
