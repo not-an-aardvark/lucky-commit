@@ -781,7 +781,7 @@ impl Display for ParseHashSpecErr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::TooLong => write!(f, "hash spec can't be longer than an actual hash"),
-            Self::InvalidCharacter(c) => write!(f, "hash spec contains invalid character '{c}' (only hex characters and underscores are allowed)"),
+            Self::InvalidCharacter(c) => write!(f, "hash spec contains invalid character '{}' (only hex characters and underscores are allowed)", c),
         }
     }
 }
