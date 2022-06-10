@@ -57,7 +57,7 @@ By default, `lucky-commit` links with your system's OpenCL headers and runs on a
 
 However, if you encounter a linker error along the lines of `/usr/bin/ld: cannot find -lOpenCL`, there are a few workarounds:
 
-* Compile `lucky-commit` without OpenCL by adding the flag `--no-default-features` to your install or build command (i.e. `cargo install lucky_commit --locked --no-default-features` or `cargo build --release --no-default-features`). This will make `lucky-commit` fall back to a multithreaded CPU implementation. The CPU implementation is about 10x slower on my laptop, but depending on what you're planning to use the tool for, there's a good chance it's fast enough anyway.
+* Compile `lucky-commit` without OpenCL by adding the flag `--no-default-features` to your install or build command (i.e. `cargo install lucky_commit --locked --no-default-features` or `cargo build --release --no-default-features`). This will make `lucky-commit` fall back to a multithreaded CPU implementation. The CPU implementation is about 20x slower on my laptop, but depending on what you're planning to use the tool for, there's a good chance it's fast enough anyway.
 
     This is the recommended approach if you just want a stable build, and you don't need the extra performance from GPUs.
 * You can try installing the OpenCL libraries for your system. The instructions for this will vary by OS (see e.g. [here](https://software.intel.com/content/www/us/en/develop/articles/opencl-drivers.html)). Note that this will only be useful if your machine has a GPU.
@@ -87,15 +87,15 @@ $ emerge dev-util/lucky-commit
 
 ### Hash rate
 
-The main bottleneck is SHA1 throughput. The default hash prefix of `0000000` has length 7, so on average, `lucky-commit` needs to compute 16<sup>7</sup> SHA1 hashes.
+`lucky-commit`'s main bottleneck is SHA1 throughput. The default hash prefix of `0000000` has length 7, so on average, `lucky-commit` needs to compute 16<sup>7</sup> SHA1 hashes.
 
-For non-GPG-signed commits, `lucky-commit` adds its whitespace to a 64-byte-aligned block at the very end of the commit message. Since everything that precedes the whitespace is constant for any particular commit, this allows `lucky-commit` to cache the SHA1 buffer state and only hash a single 64-byte block on each attempt.
+For non-GPG-signed commits, `lucky-commit` adds its whitespace to a 64-byte-aligned block at the very end of the commit message. Since everything that precedes the whitespace is constant for any particular commit, this allows `lucky-commit` to cache the SHA1 buffer state and only hash a single 64-byte block on each attempt. For an average-sized commit, this speeds up the search by a factor of ~5 over the naive approach of hashing the entire commit on each attempt.
 
-Hash searching is extremely parallelizable, and `lucky-commit` takes advantage of this by running on a GPU when available. (The intuitive idea is that if you pretend that your commits are actually graphical image data, where SHA1 is a "shading" that gets applied to the whole image at once, and the resulting commit shorthashes are, say, RGBA pixel color values, then you can hash a large number of commits at once by just "rendering the image".)
+Hash searching is extremely parallelizable, and `lucky-commit` takes advantage of this by running on a GPU. When no GPU is available, it falls back to a multithreaded CPU implementation.
 
-The GPU on my 2015 MacBook Pro can compute about 196 million single-block hashes per second. As a result, the theoretical average time to find a `0000000` commit hash on my laptop is (16<sup>7</sup> hashes) / (196000000 hashes/s) = **1.37 seconds**. You can estimate the average time for your computer by running `time lucky_commit --benchmark`.
+The GPU on my 2021 MacBook Pro can compute about 1.5 billion single-block hashes per second. As a result, the theoretical average time to find a `0000000` commit hash on my laptop is (16<sup>7</sup> hashes) / (1500000000 hashes/s) = **0.18 seconds**. You can estimate the average time for your computer by running `time lucky_commit --benchmark`.
 
-Outside of hashing, the tool also has to do a constant amount of I/O (e.g. spawning `git` a few times), resulting in an observed average time on my laptop of about 1.6 seconds.
+Outside of hashing, the tool also has to do a constant amount of I/O (e.g. spawning `git` a few times), resulting in an observed average time on my laptop of about 0.24 seconds.
 
 ### GPG signatures
 
