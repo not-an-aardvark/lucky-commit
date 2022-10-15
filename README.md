@@ -81,6 +81,14 @@ $ pacman -S lucky-commit
 $ emerge dev-util/lucky-commit
 ```
 
+#### Homebrew
+
+`lucky-commit` is available from the default Homebrew tap:
+
+```
+brew install lucky-commit
+```
+
 ## Performance
 
 `lucky-commit`'s performance is determined by how powerful your computer is, whether you GPG-sign your commits, and whether you use experimental git features.
