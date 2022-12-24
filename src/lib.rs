@@ -564,31 +564,27 @@ impl ProcessedCommit {
     /// as possible. However, if a signature is present, modifying the commit message would make
     /// the signature invalid.
     fn get_padding_insertion_point(commit: &[u8]) -> usize {
-        let mut found_gpgsig_line = false;
-        const SIGNATURE_MARKER: &[u8] = b"-----END PGP SIGNATURE-----";
-        for index in 0..commit.len() {
-            if commit[index..].starts_with(b"\ngpgsig ")
-                || commit[index..].starts_with(b"\ngpgsig-sha256 ")
-            {
-                found_gpgsig_line = true;
-            } else if !found_gpgsig_line && commit[index..].starts_with(b"\n\n") {
-                // We've reached the commit message and no GPG signature has been found.
-                // Add the padding to the end of the commit.
-                break;
-            } else if found_gpgsig_line && commit[index..].starts_with(SIGNATURE_MARKER) {
-                return index + SIGNATURE_MARKER.len();
-            }
-        }
+        // Check if the commit has a signature header before the start of the commit message
+        let insertion_point_plus_preexisting_padding = (0..commit.len())
+            .take_while(|&i| !commit[i..].starts_with(b"\n\n"))
+            .find(|&i| {
+                commit[i..].starts_with(b"\ngpgsig ")
+                    || commit[i..].starts_with(b"\ngpgsig-sha256 ")
+            })
+            .map(|i| i + 1)
+            // If so, put the padding right at the end of that header
+            .and_then(|signature_header_start_index| {
+                (signature_header_start_index..commit.len())
+                    .find(|&i| commit[i..].starts_with(b"\n") && !commit[i..].starts_with(b"\n "))
+            })
+            .unwrap_or(commit.len());
 
-        // If there's no GPG signature, trim the end of the commit and take the length.
-        // This ensures that the commit will still have a trailing newline after padding is added, and
-        // that any existing padding appears after the padding insertion point.
-        commit.len()
-            - commit
+        return insertion_point_plus_preexisting_padding
+            - commit[..insertion_point_plus_preexisting_padding]
                 .iter()
                 .rev()
                 .take_while(|&&byte| byte == b' ' || byte == b'\t' || byte == b'\n')
-                .count()
+                .count();
     }
 
     /// Returns the smallest nonnegative integer `static_padding_length` such that:
