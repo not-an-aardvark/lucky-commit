@@ -138,7 +138,7 @@ pub enum ParseHashSpecErr {
 }
 
 /// A git commit
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct GitCommit<H: GitHashFn> {
     /// The commit data, represented in git's object format
     object: Vec<u8>,
@@ -830,6 +830,17 @@ impl<H: GitHashFn> GitCommit<H> {
             .iter()
             .map(|word| format!("{:08x}", word))
             .collect()
+    }
+}
+
+impl<H: GitHashFn> Debug for GitCommit<H> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "GitCommit {{ object: {:?}, hash: {:?} }}",
+            String::from_utf8_lossy(&self.object),
+            self.hex_hash()
+        )
     }
 }
 

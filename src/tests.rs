@@ -23,15 +23,15 @@ macro_rules! test_commit_with_signature {
             parent 7654321076543210765432107654321076543210\n\
             author Foo Bár <foo@example.com> 1513980859 -0500\n\
             committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-            gpgsig -----BEGIN PGP SIGNATURE-----\n\
-            \n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            =AAAA\n\
+            gpgsig -----BEGIN PGP SIGNATURE-----\n \
+            \n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            =AAAA\n \
             -----END PGP SIGNATURE-----{static_padding}{dynamic_padding}\n\
             \n\
             Do a thing\n\
@@ -48,15 +48,15 @@ macro_rules! test_commit_with_signature_and_multiple_parents {
             parent 2468246824682468246824682468246824682468\n\
             author Foo Bár <foo@example.com> 1513980859 -0500\n\
             committer Baz Qux <baz@example.com> 1513980898 -0500\n\
-            gpgsig -----BEGIN PGP SIGNATURE-----\n\
-            \n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
-            =AAAA\n\
+            gpgsig -----BEGIN PGP SIGNATURE-----\n \
+            \n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n \
+            =AAAA\n \
             -----END PGP SIGNATURE-----{static_padding}{dynamic_padding}\n\
             \n\
             Do a thing\n\
@@ -506,18 +506,18 @@ fn search_success_with_gpg_signature() {
                 dynamic_padding = ""
             )
             .as_bytes(),
-            "49ae8".parse().unwrap(),
+            "495fb".parse().unwrap(),
         )
         .with_capped_search_space(100)
         .search(),
         Some(GitCommit {
             object: format!(
                 test_commit_with_signature!(),
-                static_padding = repeat(" ").take(40).collect::<String>(),
-                dynamic_padding = "    \t \t                                         "
+                static_padding = repeat(" ").take(31).collect::<String>(),
+                dynamic_padding = "      \t\t                                        "
             )
             .into_bytes(),
-            hash: [0x49ae8f73, 0x98bea9d3, 0x053174b2, 0x08ba6a7d, 0x03a941b8]
+            hash: [0x495fb74a, 0x51f99d4f, 0xf837bf24, 0x39c7b946, 0xe39f56a7]
         })
     );
 }
@@ -615,7 +615,7 @@ fn processed_commit_with_gpg_signature() {
         .commit(),
         format!(
             test_commit_with_signature!(),
-            static_padding = repeat(" ").take(40).collect::<String>(),
+            static_padding = repeat(" ").take(31).collect::<String>(),
             dynamic_padding = repeat("\t").take(48).collect::<String>(),
         )
         .into_bytes()
@@ -636,7 +636,7 @@ fn processed_commit_already_padded() {
         .commit(),
         format!(
             test_commit_with_signature!(),
-            static_padding = repeat(" ").take(40).collect::<String>(),
+            static_padding = repeat(" ").take(31).collect::<String>(),
             dynamic_padding = repeat("\t").take(48).collect::<String>(),
         )
         .into_bytes()
@@ -657,7 +657,7 @@ fn process_merge_commit_with_signature() {
         .commit(),
         format!(
             test_commit_with_signature_and_multiple_parents!(),
-            static_padding = repeat(" ").take(56).collect::<String>(),
+            static_padding = repeat(" ").take(47).collect::<String>(),
             dynamic_padding = repeat("\t").take(48).collect::<String>()
         )
         .into_bytes()
