@@ -44,9 +44,9 @@ Depending on your `cargo` setup, this will usually add the binary to your `$PATH
 Alternatively, you can build from source:
 
 ```
-$ git clone https://github.com/not-an-aardvark/lucky-commit
-$ cd lucky-commit/
-$ cargo build --release
+git clone https://github.com/not-an-aardvark/lucky-commit
+cd lucky-commit/
+cargo build --release
 ```
 
 This will create the `lucky_commit` binary (`lucky_commit.exe` on Windows) in the `target/release` directory. You can move this to wherever you want, or set up an alias for it.
@@ -70,7 +70,7 @@ However, if you encounter a linker error along the lines of `/usr/bin/ld: cannot
 `lucky-commit` can be installed from the [community repository](https://archlinux.org/packages/community/x86_64/lucky-commit/) using [pacman](https://wiki.archlinux.org/title/Pacman):
 
 ```
-$ pacman -S lucky-commit
+pacman -S lucky-commit
 ```
 
 #### Funtoo Linux
@@ -78,7 +78,7 @@ $ pacman -S lucky-commit
 `lucky-commit` can be installed from [dev-kit](https://github.com/funtoo/dev-kit/tree/1.4-release/dev-util/lucky-commit):
 
 ```
-$ emerge dev-util/lucky-commit
+emerge dev-util/lucky-commit
 ```
 
 #### Homebrew
