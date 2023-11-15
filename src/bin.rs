@@ -22,27 +22,29 @@ fn usage() -> ! {
 }
 fn main() -> Result<(), ParseHashSpecErr> {
     let args = env::args().collect::<Vec<String>>();
-    let maybe_prefix = match args.as_slice() {
+    let (maybe_prefix, ref_) = match args.as_slice() {
         [_, arg] if arg == "--benchmark" => {
             benchmark::run_benchmark();
             process::exit(0)
         }
         [_, arg] if arg == "-h" || arg == "--help" => usage(),
-        [_, prefix] => Some(prefix.as_str()),
+        [_, prefix] => (Some(prefix.as_str()), "HEAD"),
+        [_, prefix, existing] => (Some(prefix.as_str()), existing.as_str()),
         [_] => None,
         _ => usage(),
     };
 
-    let existing_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
+    let existing_commit = spawn_git(&["cat-file", "commit", ref_], None);
     if looks_like_sha256_repository(&existing_commit) {
-        run_lucky_commit::<Sha256>(&existing_commit, maybe_prefix)
+        run_lucky_commit::<Sha256>(&existing_commit, ref_, maybe_prefix)
     } else {
-        run_lucky_commit::<Sha1>(&existing_commit, maybe_prefix)
+        run_lucky_commit::<Sha1>(&existing_commit, ref_, maybe_prefix)
     }
 }
 
 fn run_lucky_commit<H: GitHashFn>(
     existing_commit: &[u8],
+    ref_: &str,
     maybe_prefix: Option<&str>,
 ) -> Result<(), ParseHashSpecErr> {
     let hash_spec: HashSpec<H> = maybe_prefix
@@ -63,19 +65,29 @@ fn run_lucky_commit<H: GitHashFn>(
             "Found a matching commit, but git unexpectedly computed a different hash for it",
         );
 
-        // Do an atomic ref update to ensure that no work gets lost, e.g. if someone forgot the tool was running
-        // and made new commits in the meantime.
-        spawn_git(
-            &[
-                "update-ref",
-                "-m",
-                "amend with lucky_commit",
-                "HEAD",
-                &new_hash,
-                &GitCommit::<H>::new(existing_commit).hex_hash(),
-            ],
-            None,
-        );
+        let is_ref = Command::new("git")
+            .args(["show-ref", "-q", ref_])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        if is_ref {
+            // Do an atomic ref update to ensure that no work gets lost, e.g. if someone forgot the tool was running
+            // and made new commits in the meantime.
+            spawn_git(
+                &[
+                    "update-ref",
+                    "-m",
+                    "amend with lucky_commit",
+                    ref_,
+                    &new_hash,
+                    &GitCommit::<H>::new(existing_commit).hex_hash(),
+                ],
+                None,
+            );
+        }
 
         Ok(())
     } else {
