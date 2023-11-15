@@ -9,6 +9,17 @@ use std::{
     process::{self, Command, Stdio},
 };
 
+fn usage() -> ! {
+    eprintln!(
+        "\
+        Usage: lucky_commit [commit-hash-prefix]\n\
+        \n\
+        `commit-hash-prefix` must contain hex characters and underscores. An underscore indicates \
+        that the hash may have any value in the given position.
+            "
+    );
+    process::exit(1)
+}
 fn main() -> Result<(), ParseHashSpecErr> {
     let args = env::args().collect::<Vec<String>>();
     let maybe_prefix = match args.as_slice() {
@@ -16,17 +27,10 @@ fn main() -> Result<(), ParseHashSpecErr> {
             benchmark::run_benchmark();
             process::exit(0)
         }
+        [_, arg] if arg == "-h" || arg == "--help" => usage(),
         [_, prefix] => Some(prefix.as_str()),
         [_] => None,
-        _ => {
-            eprintln!("\
-                Usage: lucky_commit [commit-hash-prefix]\n\
-                \n\
-                `commit-hash-prefix` must contain hex characters and underscores. An underscore indicates \
-                that the hash may have any value in the given position.
-            ");
-            process::exit(1)
-        }
+        _ => usage(),
     };
 
     let existing_commit = spawn_git(&["cat-file", "commit", "HEAD"], None);
