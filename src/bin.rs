@@ -73,6 +73,8 @@ fn run_lucky_commit<H: GitHashFn>(
             None,
         );
 
+        println!("new hash: {}", new_hash);
+
         Ok(())
     } else {
         eprintln!(
