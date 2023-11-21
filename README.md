@@ -67,7 +67,7 @@ However, if you encounter a linker error along the lines of `/usr/bin/ld: cannot
 
 #### Arch Linux
 
-`lucky-commit` can be installed from the [community repository](https://archlinux.org/packages/community/x86_64/lucky-commit/) using [pacman](https://wiki.archlinux.org/title/Pacman):
+`lucky-commit` can be installed from the [extra repository](https://archlinux.org/packages/extra/x86_64/lucky-commit/) using [pacman](https://wiki.archlinux.org/title/Pacman):
 
 ```
 pacman -S lucky-commit
