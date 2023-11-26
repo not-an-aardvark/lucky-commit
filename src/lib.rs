@@ -155,7 +155,7 @@ pub trait GitHashFn: private::Sealed + Debug + Send + Clone + Eq + 'static {
     /// For sha1 and sha256, this is [u32; N] for some N. Ideally this trait would just
     /// have an associated const for the length of the state vector, and then
     /// `State` would be defined as `[u32; N]`, but this isn't possible due
-    /// to https://github.com/rust-lang/rust/issues/60551.
+    /// to <https://github.com/rust-lang/rust/issues/60551>.
     type State: AsRef<[u32]> + AsMut<[u32]> + Clone + Copy + Debug + Default + Eq + Send;
 
     /// The initial value of the state vector for the given algorithm
@@ -720,9 +720,9 @@ impl<H: GitHashFn> HashSpec<H> {
 impl<H: GitHashFn> FromStr for HashSpec<H> {
     type Err = ParseHashSpecErr;
     /// Parses a HashSpec from a string. The string must only contain hex characters (0-9, a-f, A-F), indicating the hex
-    /// value that the hash should have at a given position, or '_', indicating that the hash can have any value at the given
+    /// value that the hash should have at a given position, or `_`, indicating that the hash can have any value at the given
     /// position. All positions in the hash beyond the length of the string are treated as unspecified (equivalent to if the
-    /// string was right-padded with '_').
+    /// string was right-padded with `_`).
     fn from_str(prefix_string: &str) -> Result<Self, Self::Err> {
         let max_hex_character_length = mem::size_of::<H::State>() * 2;
         if prefix_string.chars().count() > max_hex_character_length {
