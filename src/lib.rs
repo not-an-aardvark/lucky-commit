@@ -673,17 +673,16 @@ impl<'a, H: GitHashFn> PartiallyHashedCommit<'a, H> {
             padding_chunks
         };
 
-        for (padding_chunk, &padding_specifier_byte) in self
-            .dynamic_padding_mut()
+        self.dynamic_padding_mut()
             .chunks_exact_mut(8)
             .zip(padding_specifier.to_le_bytes().iter())
-        {
-            // An padding specifier is represented by an integer in the range [0, 2 ** 48).
-            // The 48-byte dynamic padding string is mapped from the 48-bit specifier such that
-            // each byte of padding is a [space/tab] if the corresponding little-endian bit of
-            // the specifier is a [0/1], respectively.
-            padding_chunk.copy_from_slice(&PADDING_CHUNKS[padding_specifier_byte as usize]);
-        }
+            .for_each(|(padding_chunk, &padding_specifier_byte)| {
+                // An padding specifier is represented by an integer in the range [0, 2 ** 48).
+                // The 48-byte dynamic padding string is mapped from the 48-bit specifier such that
+                // each byte of padding is a [space/tab] if the corresponding little-endian bit of
+                // the specifier is a [0/1], respectively.
+                padding_chunk.copy_from_slice(&PADDING_CHUNKS[padding_specifier_byte as usize]);
+            })
     }
 
     #[inline(always)]
@@ -734,7 +733,7 @@ impl<H: GitHashFn> FromStr for HashSpec<H> {
             data: H::State::default(),
             mask: H::State::default(),
         };
-        for ((hash_spec_chunk, data_word), mask_word) in prefix_string
+        prefix_string
             .chars()
             // Pad the input string out to the length of a hash
             .chain(iter::repeat('_'))
@@ -745,22 +744,24 @@ impl<H: GitHashFn> FromStr for HashSpec<H> {
             // Associate each 8-hex-character chunk with corresponding 32-bit word of the hash spec
             .zip(parsed_hash_spec.data.as_mut())
             .zip(parsed_hash_spec.mask.as_mut())
-        {
-            for (&hash_spec_character, slot_bit_offset) in
-                hash_spec_chunk.iter().zip((0..32).step_by(4).rev())
-            {
-                // Parse each hex character of the input string and write it to the appropriate slots of the hash spec.
-                if let Some(hex_character_value) = hash_spec_character.to_digit(16) {
-                    *data_word |= hex_character_value << slot_bit_offset;
-                    *mask_word |= 0xf << slot_bit_offset;
-                } else if hash_spec_character != '_' {
-                    // The '_' character in a hash spec is allowed as an "any value is allowed here" placeholder
-                    // (corresponds to a 0 in both the data slot and the mask slot). All other non-hex characters are
-                    // disallowed.
-                    return Err(ParseHashSpecErr::InvalidCharacter(hash_spec_character));
-                }
-            }
-        }
+            .try_for_each(|((hash_spec_chunk, data_word), mask_word)| {
+                hash_spec_chunk
+                    .iter()
+                    .zip((0..32).step_by(4).rev())
+                    .try_for_each(|(&hash_spec_character, slot_bit_offset)| {
+                        // Parse each hex character of the input string and write it to the appropriate slots of the hash spec.
+                        if let Some(hex_character_value) = hash_spec_character.to_digit(16) {
+                            *data_word |= hex_character_value << slot_bit_offset;
+                            *mask_word |= 0xf << slot_bit_offset;
+                        } else if hash_spec_character != '_' {
+                            // The '_' character in a hash spec is allowed as an "any value is allowed here" placeholder
+                            // (corresponds to a 0 in both the data slot and the mask slot). All other non-hex characters are
+                            // disallowed.
+                            return Err(ParseHashSpecErr::InvalidCharacter(hash_spec_character));
+                        }
+                        Ok(())
+                    })
+            })?;
 
         Ok(parsed_hash_spec)
     }
