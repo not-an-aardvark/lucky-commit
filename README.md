@@ -30,6 +30,20 @@ $ git log
 
 The command-line argument can also contain `_` placeholders (e.g. `lucky_commit 00_111`), indicating that the hash is allowed to have any hex character in the given slot.
 
+If you want a more useful hash, you can use the current date, this will make it easier to identify a commit based on its hash:
+
+```bash
+lucky_commit `date "+%y%m%d"`
+```
+
+If you want to run this automatically after every `git commit`, you can add it to a post-commit hook in your repository. Create a file `.git/hooks/post-commit`:
+```bash
+#!/bin/bash
+lucky_commit `date "+%y%m%d"`
+```
+
+Then run `chmod +x .git/hooks/post-commit`
+
 ## Why?
 
 ¯\\\_(ツ)\_/¯
