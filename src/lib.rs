@@ -288,11 +288,28 @@ impl<H: GitHashFn> HashSearchWorker<H> {
 
     #[cfg(feature = "opencl")]
     fn gpus_available() -> bool {
-        Platform::first().is_ok()
-            && !TypeFlags(DeviceType::GPU)
-                .to_device_list(None::<Platform>)
-                .unwrap()
-                .is_empty()
+        Platform::list().iter().any(|platform| {
+            platform.name().map_or_else(
+                |_| {
+                    eprintln!("Platform {:?} is not okay.", platform);
+                    false
+                },
+                |_| {
+                    TypeFlags(DeviceType::GPU)
+                        .to_device_list(Some(*platform))
+                        .map_or_else(
+                            |e| {
+                                eprintln!(
+                                    "Failed to get GPU devices for platform {:?}: {}",
+                                    platform, e
+                                );
+                                false
+                            },
+                            |devices| !devices.is_empty(),
+                        )
+                },
+            )
+        })
     }
 
     #[allow(clippy::needless_collect)]
@@ -387,7 +404,17 @@ impl<H: GitHashFn> HashSearchWorker<H> {
 
         assert!(num_threads < u32::MAX as usize);
 
-        let devices = TypeFlags(DeviceType::GPU).to_device_list(Some(Platform::default()))?[0];
+        let devices = Platform::list()
+            .iter()
+            .find_map(|platform| {
+                platform.name().ok().and_then(|_| {
+                    TypeFlags(DeviceType::GPU)
+                        .to_device_list(Some(*platform))
+                        .ok()
+                        .and_then(|devices| devices.get(0).cloned())
+                })
+            })
+            .ok_or_else(|| ocl::Error::from("No GPU devices found."))?;
         let context = Context::builder().devices(devices).build()?;
         let queue = Queue::new(&context, devices, None)?;
 
