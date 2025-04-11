@@ -27,11 +27,11 @@ num_cpus = "1.0"
 ocl = { version = "0.19", optional = true }
 
 # See https://github.com/RustCrypto/hashes/issues/315
-[target.'cfg(target_env = "msvc")'.dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
 "sha-1" = { version = "0.10", "default-features" = false, features = ["compress"] }
 "sha2" = { version = "0.10", "default-features" = false, features = ["compress"] }
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 "sha-1" = { version = "0.10", "default-features" = false, features = ["asm", "compress"] }
 "sha2" = { version = "0.10", "default-features" = false, features = ["asm", "compress"] }
 
